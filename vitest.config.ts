@@ -34,6 +34,10 @@ export default defineConfig({
         // make CI slow/flaky; samSession.ts is tested against a fake
         // SamRuntime instead, so this adapter has no dedicated unit test.
         "src/lib/sam/transformersLoader.ts",
+        // Decode File to RGBA ImageData via HTMLImageElement & HTMLCanvasElement.
+        // Relies on DOM Image decoding / Canvas 2D context which jsdom does not support;
+        // isImageFile is tested separately via unit tests.
+        "src/lib/sam/imageLoader.ts",
       ],
     },
   },
