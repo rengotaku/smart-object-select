@@ -95,4 +95,78 @@ describe("ImageDropzone", () => {
     expect(onImageLoaded).toHaveBeenCalledTimes(1);
     expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:imageA");
   });
+
+  it("Case 19: デコード中に非画像を選ぶと、後から完了した画像は通知されず解放される", async () => {
+    const deferredA = createDeferred<LoadedImage>();
+    const imageA: LoadedImage = {
+      data: new Uint8ClampedArray([255, 0, 0, 255]),
+      width: 1,
+      height: 1,
+      objectUrl: "blob:imageA",
+    };
+
+    const spyFileToLoadedImage = vi
+      .spyOn(imageLoaderModule, "fileToLoadedImage")
+      .mockImplementation((file: File) => {
+        if (file.name === "imageA.png") return deferredA.promise;
+        return Promise.reject(new Error("Unknown file"));
+      });
+
+    const onImageLoaded = vi.fn();
+    render(<ImageDropzone onImageLoaded={onImageLoaded} />);
+
+    const fileInput = screen.getByTestId("file-input");
+    const fileA = new File(["dummyA"], "imageA.png", { type: "image/png" });
+    const textFile = new File(["hello"], "hello.txt", { type: "text/plain" });
+
+    fireEvent.change(fileInput, { target: { files: [fileA] } });
+    expect(spyFileToLoadedImage).toHaveBeenCalledWith(fileA);
+
+    fireEvent.change(fileInput, { target: { files: [textFile] } });
+
+    expect(screen.getByText(/画像ファイルを選択してください/i)).toBeInTheDocument();
+
+    await act(async () => {
+      deferredA.resolve(imageA);
+    });
+
+    expect(onImageLoaded).not.toHaveBeenCalled();
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:imageA");
+    expect(screen.getByText(/画像ファイルを選択してください/i)).toBeInTheDocument();
+  });
+
+  it("Case 20: アンマウント中に完了したデコード結果は通知されず解放される", async () => {
+    const deferredA = createDeferred<LoadedImage>();
+    const imageA: LoadedImage = {
+      data: new Uint8ClampedArray([255, 0, 0, 255]),
+      width: 1,
+      height: 1,
+      objectUrl: "blob:imageA",
+    };
+
+    const spyFileToLoadedImage = vi
+      .spyOn(imageLoaderModule, "fileToLoadedImage")
+      .mockImplementation((file: File) => {
+        if (file.name === "imageA.png") return deferredA.promise;
+        return Promise.reject(new Error("Unknown file"));
+      });
+
+    const onImageLoaded = vi.fn();
+    const { unmount } = render(<ImageDropzone onImageLoaded={onImageLoaded} />);
+
+    const fileInput = screen.getByTestId("file-input");
+    const fileA = new File(["dummyA"], "imageA.png", { type: "image/png" });
+
+    fireEvent.change(fileInput, { target: { files: [fileA] } });
+    expect(spyFileToLoadedImage).toHaveBeenCalledWith(fileA);
+
+    unmount();
+
+    await act(async () => {
+      deferredA.resolve(imageA);
+    });
+
+    expect(onImageLoaded).not.toHaveBeenCalled();
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:imageA");
+  });
 });

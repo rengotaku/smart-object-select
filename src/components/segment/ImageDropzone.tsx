@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Upload, AlertCircle, Image as ImageIcon } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -16,14 +16,24 @@ export function ImageDropzone({ onImageLoaded }: ImageDropzoneProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const generationRef = useRef<number>(0);
 
+  useEffect(() => {
+    // ref オブジェクト自体は不変なのでローカルに退避してから cleanup で使う。
+    // 直接 generationRef.current を触ると exhaustive-deps が「cleanup 実行時には
+    // 値が変わっている」と警告するが、ここで欲しいのは実行時点の最新値そのもの。
+    const generation = generationRef;
+    return () => {
+      // アンマウント後に解決したデコード結果を stale にして通知させない。
+      generation.current++;
+    };
+  }, []);
+
   const handleFile = async (file: File) => {
+    const currentGen = ++generationRef.current;
     setError(null);
     if (!isImageFile(file)) {
       setError("画像ファイルを選択してください。");
       return;
     }
-
-    const currentGen = ++generationRef.current;
 
     try {
       const loadedImage = await fileToLoadedImage(file);
