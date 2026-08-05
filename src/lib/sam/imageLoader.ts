@@ -36,6 +36,7 @@ export function fileToLoadedImage(file: File): Promise<LoadedImage> {
           width,
           height,
           objectUrl,
+          sourceName: file.name,
         });
       } catch (err) {
         if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {

@@ -8,6 +8,8 @@ import {
 
 export interface LoadedImage extends SamImageInput {
   objectUrl: string;
+  /** 元ファイル名（拡張子込み）。書き出しファイル名の生成に使う。省略可 */
+  sourceName?: string;
 }
 
 export type SegmentationStatus = "idle" | "preparing" | "ready" | "segmenting" | "error";
