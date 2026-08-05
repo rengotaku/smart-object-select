@@ -1,6 +1,6 @@
 import { AlertTriangle, Cpu, Loader2, RefreshCw, Zap } from "lucide-react";
 
-import { ImageDropzone, SegmentCanvas } from "@/components";
+import { ExportBar, ImageDropzone, SegmentCanvas } from "@/components";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -128,6 +128,8 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
                 status={segStatus}
                 onSelect={(x, y) => void selectAt(x, y)}
               />
+
+              <ExportBar image={image} mask={mask} sourceFileName={image.sourceName} />
             </div>
           )}
         </>
