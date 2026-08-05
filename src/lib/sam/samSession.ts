@@ -111,6 +111,11 @@ export async function createSamSession(
   let currentImageInputs: SamImageInputs | null = null;
   let currentImageSize: [number, number] | null = null;
   let currentEmbeddings: Record<string, unknown> | null = null;
+  // 保持している embedding（currentImageInputs/currentEmbeddings）がどの世代の
+  // setImage によって作られたか。generation（最新の setImage 呼び出し世代）とは別に持つ。
+  // これにより「setImage 実行中（=generation は進んでいるが embedding はまだ古い画像のまま）」
+  // を segmentAtPoint 側から検出できる。
+  let currentEmbeddingsGeneration = 0;
 
   function ensureNotDisposed(): void {
     if (disposed) {
@@ -137,6 +142,7 @@ export async function createSamSession(
     currentImageInputs = inputs;
     currentImageSize = [image.height, image.width];
     currentEmbeddings = embeddings;
+    currentEmbeddingsGeneration = requestGeneration;
   }
 
   async function segmentAtPoint(x: number, y: number): Promise<SamMaskResult> {
@@ -145,7 +151,15 @@ export async function createSamSession(
       throw new SamNoImageError();
     }
 
-    const requestGeneration = generation;
+    // 呼び出し時点で保持している embedding の世代を固定する。以降このリクエストの結果は
+    // 常にこの世代と現在の generation を突き合わせて判定する（generation そのものではなく
+    // embedding の世代を基準にすることで、setImage 実行中の呼び出しも検出できる）。
+    const embeddingGeneration = currentEmbeddingsGeneration;
+    if (embeddingGeneration !== generation) {
+      // 新しい setImage が進行中（embedding はまだ古い画像のまま）。推論を開始せず破棄する。
+      throw new SamStaleRequestError();
+    }
+
     const imageInputs = currentImageInputs;
     const embeddings = currentEmbeddings;
     const imageSize = currentImageSize;
@@ -160,8 +174,8 @@ export async function createSamSession(
     if (disposed) {
       throw new SamDisposedError();
     }
-    if (requestGeneration !== generation) {
-      // 待機中に画像が差し替えられた。古い画像のマスクは返さない。
+    if (embeddingGeneration !== generation) {
+      // decode 待機中に画像が差し替えられた。古い画像のマスクは返さない。
       throw new SamStaleRequestError();
     }
 
@@ -170,6 +184,15 @@ export async function createSamSession(
       imageInputs.originalSizes,
       imageInputs.reshapedInputSizes
     );
+
+    if (disposed) {
+      throw new SamDisposedError();
+    }
+    if (embeddingGeneration !== generation) {
+      // post-processing 待機中に画像が差し替えられた。古い画像のマスクは返さない。
+      throw new SamStaleRequestError();
+    }
+
     const maskIndex = pickBestMaskIndex(iouScores);
     const score = iouScores[0]?.[0]?.[maskIndex] ?? 0;
 

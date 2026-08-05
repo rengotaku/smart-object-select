@@ -1,9 +1,9 @@
 import { AutoProcessor, RawImage, SamModel } from "@huggingface/transformers";
 import { SAM_MODEL_ID } from "./constants";
 import type { SamDevice } from "./device";
+import { normalizeImageInputs } from "./imageInputs";
 import type {
   MaskTensorLike,
-  SamImageInputs,
   SamModelLike,
   SamProcessorLike,
   SamRuntime,
@@ -31,7 +31,9 @@ interface TransformersSamModel {
 }
 
 interface TransformersSamProcessor {
-  (image: RawImage): Promise<SamImageInputs>;
+  // 実 API は original_sizes / reshaped_input_sizes（snake_case）を含む生オブジェクトを返す。
+  // camelCase への正規化は normalizeImageInputs（imageInputs.ts）が行う。
+  (image: RawImage): Promise<Record<string, unknown>>;
   post_process_masks(
     masks: unknown,
     originalSizes: unknown,
@@ -64,7 +66,8 @@ function wrapModel(model: TransformersSamModel): SamModelLike {
 function wrapProcessor(processor: TransformersSamProcessor): SamProcessorLike {
   return {
     async process(image) {
-      return processor(toRawImage(image));
+      const raw = await processor(toRawImage(image));
+      return normalizeImageInputs(raw);
     },
     // 確定 API は imageSize を引数に持つが、実アダプタでは process() 済みの
     // originalSizes / reshapedInputSizes（inputs 側）が正の情報源のためそちらを使う。

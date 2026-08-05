@@ -291,4 +291,129 @@ describe("createSamSession", () => {
 
     await expect(segmentPromise).rejects.toBeInstanceOf(SamDisposedError);
   });
+
+  // 追加テスト: dispose while postProcessMasks is pending
+  // 理由: 指摘3対応で追加した「postProcessMasks 完了後の disposed 再チェック」を固定する。
+  // 「追加: dispose while segmentAtPoint is pending」は decode 待機中の dispose しか
+  // 検証しておらず、postProcessMasks 待機中の dispose は別経路（別の if 分岐）のため
+  // 未カバーのまま残る。
+  it("追加: dispose while postProcessMasks is pending rejects with SamDisposedError", async () => {
+    const postProcessDeferred = deferred<MaskTensorLike[]>();
+    const processor: SamProcessorLike = {
+      process: vi.fn(
+        async (img: SamImageInput): Promise<SamImageInputs> => ({
+          originalSizes: [[img.height, img.width]],
+          reshapedInputSizes: [[img.height, img.width]],
+        })
+      ),
+      reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+      postProcessMasks: vi.fn(() => postProcessDeferred.promise),
+    };
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    const segmentPromise = session.segmentAtPoint(1, 1);
+    // decode の解決を待ち、decode 直後の disposed チェックを通過させてから dispose する。
+    // これをしないと decode 待機中の disposed チェック（別分岐）で先に reject してしまい、
+    // 狙った postProcessMasks 後のチェックを通らない。
+    await Promise.resolve();
+    session.dispose();
+    postProcessDeferred.resolve([
+      { data: new Uint8Array([0, 255, 0, 255]), dims: [1, 1, 2, 2] },
+    ]);
+
+    await expect(segmentPromise).rejects.toBeInstanceOf(SamDisposedError);
+  });
+
+  it("Case 18: setImage の準備中に segmentAtPoint を呼ぶと古い画像のマスクを返さない", async () => {
+    const processor = createFakeProcessor();
+    const deferredB = deferred<Record<string, unknown>>();
+    let callIndex = 0;
+    const getImageEmbeddings = vi.fn(() => {
+      callIndex += 1;
+      // imgA 用は即解決、imgB 用は保留（setImage(imgB) を「準備中」のまま止める）
+      return callIndex === 1 ? Promise.resolve({ tag: "A" }) : deferredB.promise;
+    });
+    const decode = vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] }));
+    const model: SamModelLike = { getImageEmbeddings, decode };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+    const imageB: SamImageInput = {
+      data: new Uint8ClampedArray(16),
+      width: 3,
+      height: 3,
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    // setImage(imgB) を開始するが完了させない（imgB の embedding は保留のまま）
+    const setImageBPromise = session.setImage(imageB);
+    const segmentPromise = session.segmentAtPoint(1, 1);
+
+    await expect(segmentPromise).rejects.toBeInstanceOf(SamStaleRequestError);
+    expect(decode).not.toHaveBeenCalled();
+
+    // pending の setImage(imgB) を後始末する（未処理の reject/pending を残さない）
+    deferredB.resolve({ tag: "B" });
+    await setImageBPromise;
+  });
+
+  it("Case 19: postProcessMasks の待機中に setImage が来たら結果を破棄する", async () => {
+    const decodeDeferred = deferred<{ predMasks: unknown; iouScores: number[][][] }>();
+    const postProcessDeferred = deferred<MaskTensorLike[]>();
+    const processor: SamProcessorLike = {
+      process: vi.fn(
+        async (img: SamImageInput): Promise<SamImageInputs> => ({
+          originalSizes: [[img.height, img.width]],
+          reshapedInputSizes: [[img.height, img.width]],
+        })
+      ),
+      reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+      postProcessMasks: vi.fn(() => postProcessDeferred.promise),
+    };
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(() => decodeDeferred.promise),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+    const imageB: SamImageInput = {
+      data: new Uint8ClampedArray(16),
+      width: 3,
+      height: 3,
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    const segmentPromise = session.segmentAtPoint(1, 1);
+
+    // decode を解決させる。この時点ではまだ setImage(imgB) を呼んでいないため、
+    // decode 直後の世代チェックは通り、postProcessMasks の呼び出しまで進む。
+    decodeDeferred.resolve({ predMasks: {}, iouScores: [[[0.9]]] });
+    await Promise.resolve();
+
+    // segmentAtPoint が postProcessMasks の完了待ちの間に、別の setImage を完了させる
+    await session.setImage(imageB);
+
+    postProcessDeferred.resolve([
+      { data: new Uint8Array([0, 255, 0, 255]), dims: [1, 1, 2, 2] },
+    ]);
+
+    await expect(segmentPromise).rejects.toBeInstanceOf(SamStaleRequestError);
+  });
 });
