@@ -161,4 +161,38 @@ describe("createSamWorkerClient", () => {
       "messageerror",
     ]);
   });
+
+  it("Case 25: worker クラッシュ後に発行したリクエストは即座に reject される", async () => {
+    const worker = new FakeWorker();
+    const ids = ["init1", "seg1"];
+    let callIndex = 0;
+    const client = createSamWorkerClient(worker, () => ids[callIndex++]);
+
+    const initRequest = client.init();
+    worker.emit({ id: "init1", type: "result", payload: "cpu" });
+    await initRequest;
+
+    const sentCountBeforeCrash = worker.sent.length;
+
+    worker.emitError();
+
+    const segmentRequest = client.segment(1, 1);
+
+    await expect(segmentRequest).rejects.toThrow();
+    expect(worker.sent.length).toBe(sentCountBeforeCrash);
+  });
+
+  it("Case 26: terminate 後に発行したリクエストも即座に reject される", async () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "seg1");
+
+    client.terminate();
+
+    const sentCountAfterTerminate = worker.sent.length;
+
+    const segmentRequest = client.segment(1, 1);
+
+    await expect(segmentRequest).rejects.toThrow();
+    expect(worker.sent.length).toBe(sentCountAfterTerminate);
+  });
 });

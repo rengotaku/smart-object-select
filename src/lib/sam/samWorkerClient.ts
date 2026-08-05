@@ -62,12 +62,21 @@ export function createSamWorkerClient(
   // "messageerror"（構造化クローン失敗）だけが届く。これらを無視すると
   // pending な request が永久に resolve/reject されず、呼び出し元は
   // 「読み込み中」のままハングする。
+  //
+  // さらに、worker がリクエストの合間（pending が空の状態）でクラッシュした
+  // 場合、その時点では reject すべき request が無いため何も起きない。その
+  // 後に発行された setImage/segment は既に停止した worker へ送られ、応答が
+  // 一切来ないまま永久 pending になる。これを防ぐため、error/messageerror
+  // を一度でも受信したらクライアントを失敗状態として保持し、以後の送信は
+  // worker へ postMessage せず即座に reject する（terminate 後も同様）。
+  let terminalError: Error | null = null;
+
   function rejectAllPending(reason: string): void {
-    const error = new Error(reason);
+    terminalError = new Error(reason);
     const requests = Array.from(pending.values());
     pending.clear();
     for (const request of requests) {
-      request.reject(error);
+      request.reject(terminalError);
     }
   }
 
@@ -88,6 +97,9 @@ export function createSamWorkerClient(
   worker.addEventListener("messageerror", onMessageError);
 
   function send<T>(request: SamWorkerRequest): Promise<T> {
+    if (terminalError) {
+      return Promise.reject(terminalError);
+    }
     return new Promise<T>((resolve, reject) => {
       pending.set(request.id, {
         resolve: resolve as (payload: unknown) => void,
@@ -116,6 +128,9 @@ export function createSamWorkerClient(
         request.reject(error);
       }
       pending.clear();
+      if (!terminalError) {
+        terminalError = error;
+      }
       worker.terminate();
     },
   };
