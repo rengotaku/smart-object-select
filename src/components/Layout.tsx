@@ -34,6 +34,9 @@ export function Layout() {
             <NavLink to="/users" className={navLinkClass}>
               Users
             </NavLink>
+            <NavLink to="/segment" className={navLinkClass}>
+              Segment
+            </NavLink>
           </nav>
           <div className="ml-auto">
             {token ? (

@@ -25,6 +25,15 @@ export default defineConfig({
         // even when not referenced by app code. Coverage is enforced via
         // shared-react-ui's gallery, not via per-template integration.
         "src/components/ui/time-picker.tsx",
+        // Web Worker entry point: only wires self.onmessage to the handler.
+        // Cannot be exercised in jsdom (no real Worker runtime); the routed
+        // logic (samWorkerHandler.ts) is unit-tested directly instead.
+        "src/lib/sam/sam.worker.ts",
+        // Thin adapter around the real @huggingface/transformers package.
+        // Importing the real package in tests would pull model weights and
+        // make CI slow/flaky; samSession.ts is tested against a fake
+        // SamRuntime instead, so this adapter has no dedicated unit test.
+        "src/lib/sam/transformersLoader.ts",
       ],
     },
   },
