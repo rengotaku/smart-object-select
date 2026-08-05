@@ -218,4 +218,19 @@ describe("useSegmentation", () => {
 
     expect(result.current.status).not.toBe("error");
   });
+
+  it("Case 17: アンマウント時に現在の objectUrl が解放される", async () => {
+    const client = createFakeClient();
+    const { result, unmount } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+    });
+
+    expect(result.current.image).toEqual(sampleImageA);
+
+    unmount();
+
+    expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:imageA");
+  });
 });

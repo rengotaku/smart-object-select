@@ -15,32 +15,40 @@ export function fileToLoadedImage(file: File): Promise<LoadedImage> {
     const img = new Image();
 
     img.onload = () => {
-      const width = img.naturalWidth || img.width;
-      const height = img.naturalHeight || img.height;
+      try {
+        const width = img.naturalWidth || img.width;
+        const height = img.naturalHeight || img.height;
 
-      const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
 
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
-        reject(new Error("Failed to get 2d context for image decoding"));
-        return;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          throw new Error("Failed to get 2d context for image decoding");
+        }
+
+        ctx.drawImage(img, 0, 0);
+        const imageData = ctx.getImageData(0, 0, width, height);
+
+        resolve({
+          data: imageData.data,
+          width,
+          height,
+          objectUrl,
+        });
+      } catch (err) {
+        if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+          URL.revokeObjectURL(objectUrl);
+        }
+        reject(err instanceof Error ? err : new Error(String(err)));
       }
-
-      ctx.drawImage(img, 0, 0);
-      const imageData = ctx.getImageData(0, 0, width, height);
-
-      resolve({
-        data: imageData.data,
-        width,
-        height,
-        objectUrl,
-      });
     };
 
     img.onerror = () => {
-      URL.revokeObjectURL(objectUrl);
+      if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+        URL.revokeObjectURL(objectUrl);
+      }
       reject(new Error("Failed to load image."));
     };
 

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   SamStaleRequestError,
   type SamImageInput,
@@ -31,6 +31,16 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
   const generationRef = useRef<number>(0);
   const statusRef = useRef<SegmentationStatus>("idle");
   const imageRef = useRef<LoadedImage | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (imageRef.current?.objectUrl) {
+        if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+          URL.revokeObjectURL(imageRef.current.objectUrl);
+        }
+      }
+    };
+  }, []);
 
   const reset = useCallback(() => {
     generationRef.current++;

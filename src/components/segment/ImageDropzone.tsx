@@ -14,6 +14,7 @@ export function ImageDropzone({ onImageLoaded }: ImageDropzoneProps) {
   const [error, setError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const generationRef = useRef<number>(0);
 
   const handleFile = async (file: File) => {
     setError(null);
@@ -22,11 +23,21 @@ export function ImageDropzone({ onImageLoaded }: ImageDropzoneProps) {
       return;
     }
 
+    const currentGen = ++generationRef.current;
+
     try {
       const loadedImage = await fileToLoadedImage(file);
-      onImageLoaded(loadedImage);
+      if (currentGen === generationRef.current) {
+        onImageLoaded(loadedImage);
+      } else {
+        if (typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
+          URL.revokeObjectURL(loadedImage.objectUrl);
+        }
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "画像の読み込みに失敗しました。");
+      if (currentGen === generationRef.current) {
+        setError(err instanceof Error ? err.message : "画像の読み込みに失敗しました。");
+      }
     }
   };
 
