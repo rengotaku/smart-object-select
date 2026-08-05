@@ -51,6 +51,31 @@ describe("exportImage", () => {
       expect(result.data.length).toBe(140);
     });
 
+    it("Case 4-13: マスク内でも元画像の半透明・透明が保持される", () => {
+      const image: SamImageInput = {
+        data: new Uint8ClampedArray([
+          10, 20, 30, 255, 40, 50, 60, 128, 70, 80, 90, 0, 100, 110, 120, 255,
+        ]),
+        width: 2,
+        height: 2,
+      };
+      const mask: SamMaskResult = {
+        data: new Uint8Array([1, 1, 1, 0]),
+        width: 2,
+        height: 2,
+        score: 0.9,
+      };
+
+      const result = applyMaskToImage(image, mask);
+
+      // 画素0・1・2（マスク内）は元画像のアルファをそのまま引き継ぐ
+      expect(Array.from(result.data.slice(0, 4))).toEqual([10, 20, 30, 255]);
+      expect(Array.from(result.data.slice(4, 8))).toEqual([40, 50, 60, 128]);
+      expect(Array.from(result.data.slice(8, 12))).toEqual([70, 80, 90, 0]);
+      // 画素3（マスク外）はアルファ 0
+      expect(result.data[15]).toBe(0);
+    });
+
     it("Case 4-4: 画像とマスクの寸法が違うと throw する", () => {
       const image: SamImageInput = {
         data: new Uint8ClampedArray(4 * 4 * 4),

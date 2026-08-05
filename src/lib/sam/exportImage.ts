@@ -30,7 +30,7 @@ export function applyMaskToImage(image: SamImageInput, mask: SamMaskResult): Rgb
       data[offset] = image.data[offset];
       data[offset + 1] = image.data[offset + 1];
       data[offset + 2] = image.data[offset + 2];
-      data[offset + 3] = 255;
+      data[offset + 3] = image.data[offset + 3];
     } else {
       data[offset + 3] = 0;
     }
