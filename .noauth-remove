@@ -1,0 +1,23 @@
+# Frontend auth files to remove when applying --no-auth transformation.
+# Each line is a path relative to the React project root (frontend/ for
+# go-react-spa, or the project root for standalone react-spa).
+# Lines starting with # and blank lines are ignored.
+#
+# Keep this list in sync with the auth-related source files in this template.
+# Adding a new auth file here is enough — noauth.sh reads this manifest at
+# scaffold time and deletes every listed path.
+src/api/auth.ts
+src/api/users.ts
+src/api/users.test.ts
+src/api/client.test.ts
+src/hooks/useAuthStore.ts
+src/hooks/useUsers.ts
+src/hooks/useUsers.test.tsx
+src/schemas/auth.ts
+src/schemas/user.ts
+src/types/auth.ts
+src/types/user.ts
+src/pages/LoginPage.tsx
+src/pages/LoginPage.test.tsx
+src/pages/UsersPage.tsx
+src/pages/UsersPage.test.tsx
