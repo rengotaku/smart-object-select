@@ -73,9 +73,11 @@ describe("download", () => {
       createObjectURL = vi.fn(() => "blob:fake-url");
       revokeObjectURL = vi.fn();
       vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+      vi.useFakeTimers();
     });
 
     afterEach(() => {
+      vi.useRealTimers();
       vi.unstubAllGlobals();
     });
 
@@ -87,12 +89,30 @@ describe("download", () => {
 
       const blob = new Blob();
       triggerDownload(blob, "smart-object-select-cutout-sample.png", fakeDoc);
+      vi.runAllTimers();
 
       expect(createElement).toHaveBeenCalledWith("a");
       expect(anchor.download).toBe("smart-object-select-cutout-sample.png");
       expect(anchor.href).toBe("blob:fake-url");
       expect(click).toHaveBeenCalledTimes(1);
       expect(createObjectURL).toHaveBeenCalledWith(blob);
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake-url");
+    });
+
+    it("Case 4-14: revoke がクリックと同じ同期処理内では呼ばれない", () => {
+      const click = vi.fn();
+      const anchor = { href: "", download: "", click } as unknown as HTMLAnchorElement;
+      const createElement = vi.fn(() => anchor);
+      const fakeDoc = { createElement } as unknown as Document;
+
+      const blob = new Blob();
+      triggerDownload(blob, "smart-object-select-cutout-sample.png", fakeDoc);
+
+      expect(revokeObjectURL).toHaveBeenCalledTimes(0);
+
+      vi.runAllTimers();
+
+      expect(revokeObjectURL).toHaveBeenCalledTimes(1);
       expect(revokeObjectURL).toHaveBeenCalledWith("blob:fake-url");
     });
   });

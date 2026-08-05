@@ -40,7 +40,13 @@ export function pixelsToPngBlob(
   });
 }
 
-/** Blob をダウンロードさせる。document は差し替え可能 */
+/**
+ * Blob をダウンロードさせる。document は差し替え可能
+ *
+ * `URL.revokeObjectURL` は `click()` と同じ同期処理内では呼ばない。Firefox 等
+ * ダウンロードが非同期に開始されるブラウザでは、読み込み前に URL が無効化され
+ * ファイルが保存されないため（クリック後・次タスク以降に解放する）。
+ */
 export function triggerDownload(
   blob: Blob,
   filename: string,
@@ -52,9 +58,16 @@ export function triggerDownload(
     anchor.href = url;
     anchor.download = filename;
     anchor.click();
-  } finally {
+  } catch (err) {
+    // クリックまで到達できなければダウンロードは始まらないので、遅延解放を待たず
+    // ここで解放する（待つと解放されないまま Blob が残る）。
     URL.revokeObjectURL(url);
+    throw err;
   }
+
+  setTimeout(() => {
+    URL.revokeObjectURL(url);
+  }, 0);
 }
 
 /**
