@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { useSamEngine } from "./useSamEngine";
+import { useSamEngine, type UseSamEngineResult } from "./useSamEngine";
 import type { SamWorkerClient, SamDevice, SamMaskResult } from "@/lib/sam";
 
 function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerClient {
@@ -131,5 +131,26 @@ describe("useSamEngine", () => {
     expect(FakeWorker.instances[0].options).toEqual({ type: "module" });
 
     unmount();
+  });
+
+  it("Case 24: createClient が同期 throw しても hook が error 状態になりクラッシュしない", async () => {
+    const failure = new Error("Worker construction blocked by CSP");
+    const createClient = vi.fn((): SamWorkerClient => {
+      throw failure;
+    });
+
+    let renderError: unknown;
+    let result: { current: UseSamEngineResult } | undefined;
+    try {
+      result = renderHook(() => useSamEngine(createClient)).result;
+    } catch (err) {
+      renderError = err;
+    }
+
+    expect(renderError).toBeUndefined();
+    await waitFor(() => {
+      expect(result?.current.status).toBe("error");
+    });
+    expect(result?.current.error).toBe(failure);
   });
 });

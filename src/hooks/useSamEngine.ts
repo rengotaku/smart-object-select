@@ -41,7 +41,30 @@ export function useSamEngine(createClient?: () => SamWorkerClient): UseSamEngine
 
   useEffect(() => {
     let cancelled = false;
-    const instance = clientFactory();
+
+    // clientFactory()（＝実 Worker 生成時の `new Worker(...)`）は CSP 制限や
+    // Worker 非対応環境で「同期的に」throw しうる。promise チェーンの外で
+    // 起きる同期例外は .catch() に届かず effect からそのまま送出され、
+    // error boundary の無いこのアプリではコンポーネントツリーごとクラッシュ
+    // する（画面が白くなる）。ここで try/catch して error 状態に落とし込む。
+    let instance: SamWorkerClient;
+    try {
+      instance = clientFactory();
+    } catch (err: unknown) {
+      // setState はここで同期的に呼ばず、他の分岐（init 失敗時の .catch）と
+      // 揃えてマイクロタスクへ逃がす（react-hooks/set-state-in-effect対策。
+      // effect body 内での同期 setState 呼び出しはカスケードレンダーを招くため
+      // 禁止されている）。
+      const syncError = err instanceof Error ? err : new Error(String(err));
+      Promise.resolve().then(() => {
+        if (cancelled) return;
+        setError(syncError);
+        setStatus("error");
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
 
     instance
       .init()

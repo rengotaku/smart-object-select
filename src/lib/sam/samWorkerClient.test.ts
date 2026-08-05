@@ -1,24 +1,38 @@
 import { describe, it, expect } from "vitest";
 import { createSamWorkerClient, type WorkerLike } from "./samWorkerClient";
 
+type FakeWorkerEventType = "message" | "error" | "messageerror";
+
 class FakeWorker implements WorkerLike {
   sent: unknown[] = [];
   terminated = false;
-  private listeners: Array<(event: { data: unknown }) => void> = [];
+  removedListenerTypes: FakeWorkerEventType[] = [];
+  private listeners: Map<FakeWorkerEventType, Array<(event: { data: unknown }) => void>> =
+    new Map();
 
   postMessage(message: unknown): void {
     this.sent.push(message);
   }
 
-  addEventListener(_type: "message", listener: (event: { data: unknown }) => void): void {
-    this.listeners.push(listener);
+  addEventListener(
+    type: FakeWorkerEventType,
+    listener: (event: { data: unknown }) => void
+  ): void {
+    const existing = this.listeners.get(type) ?? [];
+    existing.push(listener);
+    this.listeners.set(type, existing);
   }
 
   removeEventListener(
-    _type: "message",
+    type: FakeWorkerEventType,
     listener: (event: { data: unknown }) => void
   ): void {
-    this.listeners = this.listeners.filter((registered) => registered !== listener);
+    this.removedListenerTypes.push(type);
+    const existing = this.listeners.get(type) ?? [];
+    this.listeners.set(
+      type,
+      existing.filter((registered) => registered !== listener)
+    );
   }
 
   terminate(): void {
@@ -26,9 +40,27 @@ class FakeWorker implements WorkerLike {
   }
 
   emit(data: unknown): void {
-    for (const listener of this.listeners) {
+    for (const listener of this.listeners.get("message") ?? []) {
       listener({ data });
     }
+  }
+
+  emitError(): void {
+    for (const listener of this.listeners.get("error") ?? []) {
+      listener({ data: undefined });
+    }
+  }
+
+  emitMessageError(): void {
+    for (const listener of this.listeners.get("messageerror") ?? []) {
+      listener({ data: undefined });
+    }
+  }
+
+  registeredTypes(): FakeWorkerEventType[] {
+    return Array.from(this.listeners.keys()).filter(
+      (type) => (this.listeners.get(type) ?? []).length > 0
+    );
   }
 }
 
@@ -92,5 +124,41 @@ describe("createSamWorkerClient", () => {
 
     const ids = worker.sent.map((message) => (message as { id: string }).id);
     expect(new Set(ids).size).toBe(2);
+  });
+
+  it("Case 21: worker の error イベントで pending request が reject される", async () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "init1");
+
+    const request = client.init();
+    worker.emitError();
+
+    await expect(request).rejects.toThrow();
+  });
+
+  it("Case 22: messageerror イベントでも pending request が reject される", async () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "seg1");
+
+    const request = client.segment(1, 1);
+    worker.emitMessageError();
+
+    await expect(request).rejects.toThrow();
+  });
+
+  it("Case 23: terminate 後に登録リスナーが全て解除される", () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker);
+
+    expect(worker.registeredTypes().sort()).toEqual(["error", "message", "messageerror"]);
+
+    client.terminate();
+
+    expect(worker.registeredTypes()).toEqual([]);
+    expect(worker.removedListenerTypes.sort()).toEqual([
+      "error",
+      "message",
+      "messageerror",
+    ]);
   });
 });

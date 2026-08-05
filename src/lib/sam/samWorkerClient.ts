@@ -2,11 +2,16 @@ import type { SamDevice } from "./device";
 import type { SamImageInput, SamMaskResult } from "./types";
 import type { SamWorkerRequest, SamWorkerResponse } from "./protocol";
 
+type WorkerEventType = "message" | "error" | "messageerror";
+
 export interface WorkerLike {
   postMessage(message: unknown): void;
-  addEventListener(type: "message", listener: (event: { data: unknown }) => void): void;
+  addEventListener(
+    type: WorkerEventType,
+    listener: (event: { data: unknown }) => void
+  ): void;
   removeEventListener(
-    type: "message",
+    type: WorkerEventType,
     listener: (event: { data: unknown }) => void
   ): void;
   terminate(): void;
@@ -52,7 +57,35 @@ export function createSamWorkerClient(
     request.resolve(response.payload);
   }
 
+  // Worker のモジュール読み込み失敗・モデル初期化中のクラッシュ・OOM 等では
+  // "message" イベントが一切発火せず、"error"（DOM ErrorEvent）または
+  // "messageerror"（構造化クローン失敗）だけが届く。これらを無視すると
+  // pending な request が永久に resolve/reject されず、呼び出し元は
+  // 「読み込み中」のままハングする。
+  function rejectAllPending(reason: string): void {
+    const error = new Error(reason);
+    const requests = Array.from(pending.values());
+    pending.clear();
+    for (const request of requests) {
+      request.reject(error);
+    }
+  }
+
+  function onWorkerError(): void {
+    rejectAllPending(
+      "SAM worker emitted an error event (worker crashed or failed to load)"
+    );
+  }
+
+  function onMessageError(): void {
+    rejectAllPending(
+      "SAM worker emitted a messageerror event (structured clone failure)"
+    );
+  }
+
   worker.addEventListener("message", onMessage);
+  worker.addEventListener("error", onWorkerError);
+  worker.addEventListener("messageerror", onMessageError);
 
   function send<T>(request: SamWorkerRequest): Promise<T> {
     return new Promise<T>((resolve, reject) => {
@@ -76,6 +109,8 @@ export function createSamWorkerClient(
     },
     terminate(): void {
       worker.removeEventListener("message", onMessage);
+      worker.removeEventListener("error", onWorkerError);
+      worker.removeEventListener("messageerror", onMessageError);
       const error = new Error("SAM worker client was terminated");
       for (const request of pending.values()) {
         request.reject(error);
