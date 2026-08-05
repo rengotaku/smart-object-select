@@ -1,0 +1,67 @@
+import { useEffect, useState } from "react";
+import { createSamWorkerClient, type SamDevice, type SamWorkerClient } from "@/lib/sam";
+
+export type SamEngineStatus = "idle" | "initializing" | "ready" | "error";
+
+export interface UseSamEngineResult {
+  status: SamEngineStatus;
+  device: SamDevice | null;
+  error: Error | null;
+  client: SamWorkerClient | null;
+}
+
+/**
+ * 実 Worker を起動する既定のクライアントファクトリ。
+ * Vite の worker import 構文を使うため、テストからは差し替えて
+ * jsdom 上で実 Worker を起動しないようにすること（Case 17 前提）。
+ */
+function createDefaultClient(): SamWorkerClient {
+  const worker = new Worker(new URL("../lib/sam/sam.worker.ts", import.meta.url), {
+    type: "module",
+  });
+  return createSamWorkerClient(worker);
+}
+
+/**
+ * SAM 推論エンジン（Web Worker）のライフサイクルを管理する React hook。
+ * マウント時に client を生成して init() を実行し、アンマウント時に terminate() する。
+ */
+export function useSamEngine(createClient?: () => SamWorkerClient): UseSamEngineResult {
+  // マウント直後は必ず init() が走り始めるため、初期値をそのまま "initializing"
+  // にする（"idle" は型の完全性のために残る値で、この hook 自体は遷移しない）。
+  const [status, setStatus] = useState<SamEngineStatus>("initializing");
+  const [device, setDevice] = useState<SamDevice | null>(null);
+  const [error, setError] = useState<Error | null>(null);
+  const [client, setClient] = useState<SamWorkerClient | null>(null);
+
+  // createClient は初回レンダー時点の値だけを使う（マウント/アンマウントの
+  // 1回だけ初期化 effect を走らせるための lazy snapshot。以後の再レンダーで
+  // createClient の参照が変わっても再初期化はしない）。
+  const [clientFactory] = useState(() => createClient ?? createDefaultClient);
+
+  useEffect(() => {
+    let cancelled = false;
+    const instance = clientFactory();
+
+    instance
+      .init()
+      .then((resolvedDevice) => {
+        if (cancelled) return;
+        setDevice(resolvedDevice);
+        setClient(instance);
+        setStatus("ready");
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setError(err instanceof Error ? err : new Error(String(err)));
+        setStatus("error");
+      });
+
+    return () => {
+      cancelled = true;
+      instance.terminate();
+    };
+  }, [clientFactory]);
+
+  return { status, device, error, client };
+}

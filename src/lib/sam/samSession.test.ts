@@ -1,0 +1,294 @@
+import { describe, it, expect, vi } from "vitest";
+import {
+  createSamSession,
+  binarizeMask,
+  pickBestMaskIndex,
+  SamNoImageError,
+  SamStaleRequestError,
+  SamDisposedError,
+  type SamRuntime,
+  type SamModelLike,
+  type SamProcessorLike,
+  type SamImageInputs,
+  type MaskTensorLike,
+} from "./samSession";
+import type { SamImageInput } from "./types";
+
+/**
+ * setTimeout 等でタイミングを作らず、手動で resolve/reject できる deferred promise。
+ * Case 9 / Case 10 の競合状態を決定的に再現するために使う。
+ */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+const image: SamImageInput = { data: new Uint8ClampedArray(16), width: 2, height: 2 };
+
+function createFakeProcessor(): SamProcessorLike {
+  return {
+    process: vi.fn(
+      async (img: SamImageInput): Promise<SamImageInputs> => ({
+        originalSizes: [[img.height, img.width]],
+        reshapedInputSizes: [[img.height, img.width]],
+      })
+    ),
+    reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+    postProcessMasks: vi.fn(
+      async (): Promise<MaskTensorLike[]> => [
+        { data: new Uint8Array([0, 255, 0, 255]), dims: [1, 1, 2, 2] },
+      ]
+    ),
+  };
+}
+
+describe("pickBestMaskIndex", () => {
+  it("returns the index of the highest score", () => {
+    expect(pickBestMaskIndex([[[0.1, 0.9, 0.4]]])).toBe(1);
+  });
+});
+
+describe("binarizeMask", () => {
+  it("converts values greater than 0 to 1 and the rest to 0", () => {
+    const tensor: MaskTensorLike = {
+      data: new Uint8Array([0, 255, 0, 255]),
+      dims: [1, 1, 2, 2],
+    };
+
+    expect(binarizeMask(tensor, 0)).toEqual({
+      data: new Uint8Array([0, 1, 0, 1]),
+      width: 2,
+      height: 2,
+      score: 0,
+    });
+  });
+});
+
+describe("createSamSession", () => {
+  it("Case 5: setImage -> segmentAtPoint returns the binarized best-score mask", async () => {
+    const processor = createFakeProcessor();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({ embedding: "e" })),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+    const result = await session.segmentAtPoint(1, 1);
+
+    expect(result).toEqual({
+      width: 2,
+      height: 2,
+      score: 0.9,
+      data: new Uint8Array([0, 1, 0, 1]),
+    });
+  });
+
+  it("Case 6: embedding is computed only once across multiple segmentAtPoint calls", async () => {
+    const processor = createFakeProcessor();
+    const getImageEmbeddings = vi.fn(async () => ({ embedding: "e" }));
+    const model: SamModelLike = {
+      getImageEmbeddings,
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+    await session.segmentAtPoint(1, 1);
+    await session.segmentAtPoint(2, 2);
+    await session.segmentAtPoint(3, 3);
+
+    expect(getImageEmbeddings).toHaveBeenCalledTimes(1);
+  });
+
+  it("Case 7: setImage with a different image recomputes embeddings", async () => {
+    const processor = createFakeProcessor();
+    const embeddingsByCall = [{ tag: "A" }, { tag: "B" }];
+    let callIndex = 0;
+    const getImageEmbeddings = vi.fn(async () => embeddingsByCall[callIndex++]);
+    const decode = vi.fn(async (args: Record<string, unknown>) => {
+      void args; // 型上は Record<string, unknown> を受け取る decode を模す。呼び出し引数は mock.calls で検証する
+      return { predMasks: {}, iouScores: [[[0.9]]] };
+    });
+    const model: SamModelLike = { getImageEmbeddings, decode };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+    const imageB: SamImageInput = {
+      data: new Uint8ClampedArray(16),
+      width: 3,
+      height: 3,
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+    await session.segmentAtPoint(1, 1);
+    await session.setImage(imageB);
+    await session.segmentAtPoint(1, 1);
+
+    expect(getImageEmbeddings).toHaveBeenCalledTimes(2);
+    const secondDecodeArgs = decode.mock.calls[1][0] as Record<string, unknown>;
+    expect(secondDecodeArgs.tag).toBe("B");
+  });
+
+  it("Case 8: segmentAtPoint before setImage rejects with SamNoImageError", async () => {
+    const processor = createFakeProcessor();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+
+    await expect(session.segmentAtPoint(1, 1)).rejects.toBeInstanceOf(SamNoImageError);
+  });
+
+  it("Case 9: a stale setImage does not overwrite a newer one", async () => {
+    const processor = createFakeProcessor();
+    const deferredA = deferred<Record<string, unknown>>();
+    const deferredB = deferred<Record<string, unknown>>();
+    const embeddingsQueue = [deferredA, deferredB];
+    let callIndex = 0;
+    const getImageEmbeddings = vi.fn(() => embeddingsQueue[callIndex++].promise);
+    const decode = vi.fn(async (args: Record<string, unknown>) => {
+      void args; // 型上は Record<string, unknown> を受け取る decode を模す。呼び出し引数は mock.calls で検証する
+      return { predMasks: {}, iouScores: [[[0.9]]] };
+    });
+    const model: SamModelLike = { getImageEmbeddings, decode };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+    const imageB: SamImageInput = {
+      data: new Uint8ClampedArray(16),
+      width: 3,
+      height: 3,
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+
+    const setImageA = session.setImage(image);
+    const setImageB = session.setImage(imageB);
+
+    deferredB.resolve({ tag: "B" });
+    await setImageB;
+    deferredA.resolve({ tag: "A" });
+    await setImageA;
+
+    await session.segmentAtPoint(1, 1);
+
+    const decodeArgs = decode.mock.calls[0][0] as Record<string, unknown>;
+    expect(decodeArgs.tag).toBe("B");
+  });
+
+  it("Case 10: segmentAtPoint rejects with SamStaleRequestError when a newer setImage lands while pending", async () => {
+    const processor = createFakeProcessor();
+    const decodeDeferred = deferred<{ predMasks: unknown; iouScores: number[][][] }>();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(() => decodeDeferred.promise),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+    const imageB: SamImageInput = {
+      data: new Uint8ClampedArray(16),
+      width: 3,
+      height: 3,
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    const segmentPromise = session.segmentAtPoint(1, 1);
+    await session.setImage(imageB);
+    decodeDeferred.resolve({ predMasks: {}, iouScores: [[[0.9]]] });
+
+    await expect(segmentPromise).rejects.toBeInstanceOf(SamStaleRequestError);
+  });
+
+  it("Case 11: operations after dispose reject with SamDisposedError", async () => {
+    const processor = createFakeProcessor();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    session.dispose();
+
+    await expect(session.setImage(image)).rejects.toBeInstanceOf(SamDisposedError);
+    await expect(session.segmentAtPoint(1, 1)).rejects.toBeInstanceOf(SamDisposedError);
+  });
+
+  // 追加テスト: dispose 中の pending 操作
+  // 検知/理由: Case 11 の意図は「アンマウント後に推論が走り続けてメモリを保持するのを防ぐ」こと。
+  // 呼び出し後の操作だけでなく、dispose() 時点で既に進行中だった setImage / segmentAtPoint も
+  // 破棄済みの状態を復活させたり結果を返したりしないことを固定する。
+  it("追加: dispose while setImage is pending discards the result instead of resurrecting state", async () => {
+    const processor = createFakeProcessor();
+    const embeddingsDeferred = deferred<Record<string, unknown>>();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(() => embeddingsDeferred.promise),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    const setImagePromise = session.setImage(image);
+    session.dispose();
+    embeddingsDeferred.resolve({ tag: "A" });
+
+    await expect(setImagePromise).rejects.toBeInstanceOf(SamDisposedError);
+  });
+
+  it("追加: dispose while segmentAtPoint is pending rejects with SamDisposedError instead of resolving", async () => {
+    const processor = createFakeProcessor();
+    const decodeDeferred = deferred<{ predMasks: unknown; iouScores: number[][][] }>();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(() => decodeDeferred.promise),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    const segmentPromise = session.segmentAtPoint(1, 1);
+    session.dispose();
+    decodeDeferred.resolve({ predMasks: {}, iouScores: [[[0.9]]] });
+
+    await expect(segmentPromise).rejects.toBeInstanceOf(SamDisposedError);
+  });
+});
