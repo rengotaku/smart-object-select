@@ -1,5 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react";
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SegmentPage } from "./SegmentPage";
 import type { SamWorkerClient, SamDevice, SamMaskResult } from "@/lib/sam";
 
@@ -20,11 +20,24 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
   };
 }
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe("SegmentPage", () => {
+  beforeEach(() => {
+    vi.stubGlobal("URL", {
+      createObjectURL: vi.fn(() => "blob:fake"),
+      revokeObjectURL: vi.fn(),
+    });
+    HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
+      drawImage: vi.fn(),
+      putImageData: vi.fn(),
+      clearRect: vi.fn(),
+      createImageData: vi.fn().mockReturnValue({ data: new Uint8ClampedArray(4) }),
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("初期化中は読み込み中のメッセージを表示する", () => {
     const client = createFakeClient({
       init: vi.fn(() => new Promise<SamDevice>(() => {})),

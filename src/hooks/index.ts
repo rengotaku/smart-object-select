@@ -12,3 +12,9 @@ export {
   type SamEngineStatus,
   type UseSamEngineResult,
 } from "./useSamEngine";
+export {
+  useSegmentation,
+  type LoadedImage,
+  type SegmentationStatus,
+  type UseSegmentationResult,
+} from "./useSegmentation";

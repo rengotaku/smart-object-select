@@ -1,8 +1,10 @@
-import { AlertTriangle, Cpu, Loader2, Zap } from "lucide-react";
+import { AlertTriangle, Cpu, Loader2, RefreshCw, Zap } from "lucide-react";
 
+import { ImageDropzone, SegmentCanvas } from "@/components";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { useSamEngine } from "@/hooks";
+import { useSamEngine, useSegmentation } from "@/hooks";
 import { cn } from "@/lib/utils";
 import type { SamWorkerClient } from "@/lib/sam";
 
@@ -14,66 +16,122 @@ export interface SegmentPageProps {
   createClient?: () => SamWorkerClient;
 }
 
-/**
- * SAM 推論エンジン（device / ロード状態）を表示する最小画面。
- * 画像アップロード・Canvas・クリック処理は #3 で実装する（本ページの対象外）。
- */
 export function SegmentPage({ createClient }: SegmentPageProps = {}) {
-  const { status, device, error } = useSamEngine(createClient);
+  const {
+    status: engineStatus,
+    device,
+    client,
+    error: engineError,
+  } = useSamEngine(createClient);
+  const {
+    status: segStatus,
+    image,
+    mask,
+    error: segError,
+    setImage,
+    selectAt,
+    reset,
+  } = useSegmentation(client);
 
   return (
-    <div>
-      <h1 className="mb-6 text-3xl font-bold tracking-tight">Segment</h1>
+    <div className="space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Segment</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            任意の位置をクリックしてオブジェクトをオートマスク選択します
+          </p>
+        </div>
 
-      <Card className="max-w-md">
-        <CardHeader>
-          <CardTitle>推論エンジン</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {status === "initializing" && (
+        {engineStatus === "ready" && device && (
+          <span
+            className={cn(
+              "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
+              device === "webgpu"
+                ? "bg-primary text-primary-foreground"
+                : "bg-secondary text-secondary-foreground"
+            )}
+          >
+            {device === "webgpu" ? (
+              <Zap className="size-3.5" aria-hidden="true" />
+            ) : (
+              <Cpu className="size-3.5" aria-hidden="true" />
+            )}
+            {device === "webgpu" ? "WebGPU" : "WASM"}
+          </span>
+        )}
+      </div>
+
+      {engineStatus === "initializing" && (
+        <Card className="max-w-md">
+          <CardHeader>
+            <CardTitle>推論エンジン</CardTitle>
+          </CardHeader>
+          <CardContent>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
               <span>モデルを読み込んでいます</span>
             </div>
-          )}
+          </CardContent>
+        </Card>
+      )}
 
-          {status === "ready" && device && (
-            <span
-              className={cn(
-                "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
-                device === "webgpu"
-                  ? "bg-primary text-primary-foreground"
-                  : "bg-secondary text-secondary-foreground"
-              )}
-            >
-              {device === "webgpu" ? (
-                <Zap className="size-3.5" aria-hidden="true" />
-              ) : (
-                <Cpu className="size-3.5" aria-hidden="true" />
-              )}
-              {device === "webgpu" ? "WebGPU" : "WASM"}
-            </span>
-          )}
+      {engineStatus === "ready" && device === "wasm" && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>WASM で実行しています</AlertTitle>
+          <AlertDescription>
+            WebGPU が利用できないため WASM で実行します。処理に時間がかかります。
+          </AlertDescription>
+        </Alert>
+      )}
 
-          {status === "ready" && device === "wasm" && (
-            <Alert variant="destructive">
-              <AlertTriangle className="size-4" />
-              <AlertTitle>WASM で実行しています</AlertTitle>
-              <AlertDescription>
-                WebGPU が利用できないため WASM で実行します。処理に時間がかかります。
-              </AlertDescription>
-            </Alert>
-          )}
+      {engineStatus === "error" && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>初期化に失敗しました</AlertTitle>
+          <AlertDescription>
+            {engineError?.message || "不明なエラーです"}
+          </AlertDescription>
+        </Alert>
+      )}
 
-          {status === "error" && (
-            <Alert variant="destructive">
-              <AlertTriangle className="size-4" />
-              <AlertTitle>初期化に失敗しました</AlertTitle>
-              <AlertDescription>{error?.message || "不明なエラーです"}</AlertDescription>
-            </Alert>
+      {segError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>エラー</AlertTitle>
+          <AlertDescription>
+            {segError.message || "処理中にエラーが発生しました"}
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {engineStatus === "ready" && (
+        <>
+          {!image ? (
+            <ImageDropzone onImageLoaded={(img) => void setImage(img)} />
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-medium text-muted-foreground">
+                  クリックして対象のオブジェクトを選択してください
+                </span>
+                <Button variant="outline" size="sm" onClick={reset}>
+                  <RefreshCw className="mr-2 size-4" />
+                  別の画像を選ぶ
+                </Button>
+              </div>
+
+              <SegmentCanvas
+                image={image}
+                mask={mask}
+                status={segStatus}
+                onSelect={(x, y) => void selectAt(x, y)}
+              />
+            </div>
           )}
-        </CardContent>
-      </Card>
+        </>
+      )}
     </div>
   );
 }
