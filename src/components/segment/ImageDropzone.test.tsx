@@ -1,4 +1,5 @@
 import { render, screen, fireEvent, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ImageDropzone } from "./ImageDropzone";
 import * as imageLoaderModule from "@/lib/sam/imageLoader";
@@ -168,5 +169,31 @@ describe("ImageDropzone", () => {
 
     expect(onImageLoaded).not.toHaveBeenCalled();
     expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:imageA");
+  });
+
+  it("Case 21: ファイル選択後に input の値がクリアされる", async () => {
+    // fireEvent.change + target.files では jsdom が value を never-set のまま
+    // 常に "" を返し、修正の有無にかかわらずテストが通ってしまう（無意味なテストに
+    // なる）。userEvent.upload はブラウザ同様に fakepath 形式の value を実際に
+    // セットしてから change を発火するため、クリア処理の有無を正しく検知できる。
+    const image: LoadedImage = {
+      data: new Uint8ClampedArray([255, 0, 0, 255]),
+      width: 1,
+      height: 1,
+      objectUrl: "blob:imageA",
+    };
+    vi.spyOn(imageLoaderModule, "fileToLoadedImage").mockResolvedValue(image);
+
+    const onImageLoaded = vi.fn();
+    const user = userEvent.setup();
+    render(<ImageDropzone onImageLoaded={onImageLoaded} />);
+
+    const fileInput = screen.getByTestId("file-input") as HTMLInputElement;
+    const file = new File(["dummy"], "image.png", { type: "image/png" });
+
+    await user.upload(fileInput, file);
+
+    expect(fileInput.value).toBe("");
+    expect(onImageLoaded).toHaveBeenCalledWith(image);
   });
 });

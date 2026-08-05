@@ -54,7 +54,11 @@ export function ImageDropzone({ onImageLoaded }: ImageDropzoneProps) {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files && files.length > 0) {
-      void handleFile(files[0]);
+      const file = files[0];
+      // 同じファイルを再選択してもブラウザが change を発火できるよう、
+      // 非同期処理（handleFile）を始める前に同期的に value をクリアする。
+      e.currentTarget.value = "";
+      void handleFile(file);
     }
   };
 
