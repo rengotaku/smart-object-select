@@ -173,7 +173,13 @@ Worker のモジュール読み込み失敗・モデル初期化中のクラッ�
 
 issue [#2 完了コメント](https://github.com/rengotaku/smart-object-select/issues/1) に記録されている通り、SAM 推論コア実装の codex レビューで **fake runtime によるテストが緑のまま検知できない silent failure が 6 件**見つかった（processor の命名不一致でセグメンテーションが常に失敗する／画像差し替え直後のクリックで前の画像のマスクが出る／worker 障害で「読み込み中」のまま無限ハングする、等）。実装とテストを同じ視点・同じタイミングで書くと、両方が同じ盲点を持ち、テストが「実装が間違っていても通る」空虚なものになってしまう。
 
-これを踏まえ、`samSession.test.ts` や `useSegmentation.test.tsx` 等の一部テストには `Case N: 🔴 ...` という命名が付いている（例: `SegmentCanvas.test.tsx` の `Case 14`、`useSegmentation.test.tsx` の `Case 7` / `Case 10`）。`docs/adr/0002-generation-guards-for-async-races.md` はこの運用を支える ADR として `0003-verify-tests-fail-before-fixing` を関連リンクに挙げているが、**このリポジトリには `docs/adr/0003-*.md` が存在しない（ダングリング参照）**。したがって「🔴 が正確に何を意味するか（命名規約として何を保証しているか）」はドキュメント上では確認できず、**未確認**として扱う。確認できる事実は次の2点のみ:
+これを踏まえた運用が `docs/adr/0003-verify-tests-fail-before-fixing.md` に記録されている。**新しく書いたテストは、対象の実装を一時的に壊すと実際に赤くなることを確認してから採用する**（確認結果は完了報告に残す）。赤にならないテストは検証手段として機能していないので、期待値を緩めるのではなくテストの設計をやり直す。
+
+TDD の「先に赤を見る」と目的は同じだが、**修正系のタスクでは実装が既に存在するため通常の TDD だけでは赤を経由しない**。そこを補う運用として明示されている。背景には jsdom の性質があり、未実装の API がエラーではなく「何もしない」挙動になるため、**修正の有無にかかわらず通るテスト**が混入しうる（実例: `fireEvent.change` は input の `value` を設定しない、`getBoundingClientRect` は常に全ゼロを返す）。
+
+`samSession.test.ts` や `useSegmentation.test.tsx` 等の一部テストに付いている `Case N: 🔴 ...` という命名（例: `SegmentCanvas.test.tsx` の `Case 14`、`useSegmentation.test.tsx` の `Case 7` / `Case 10`）は、**壊すと silent failure が復活する重要ケース**の目印。ただし絵文字表記そのものを定義した記述はドキュメント上に無いため、規約としての厳密な意味は**未確認**。
+
+そのほか確認できる事実:
 
 - 世代ガードの回帰テスト（`Case 9` / `Case 10` / `Case 18` / `Case 19` / `Case 20` 等）は、上記の silent failure 検出を受けて追加されたこと（ADR 0002「関連」節）
 - 世代ガード系のテストは deferred promise で競合を決定的に駆動しており、`setTimeout` を使うテストへの書き換えは ADR 0002 で明示的に禁止されていること
