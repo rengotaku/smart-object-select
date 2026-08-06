@@ -23,20 +23,24 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
     init: vi.fn(async (): Promise<SamDevice> => "wasm"),
     setImage: vi.fn(async (): Promise<void> => undefined),
     segment: vi.fn(
-      async (): Promise<SamMaskResult> => ({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 0.8,
-      })
+      async (): Promise<SamMaskResult[]> => [
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 0.8,
+        },
+      ]
     ),
     segmentAtPoints: vi.fn(
-      async (): Promise<SamMaskResult> => ({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 0.8,
-      })
+      async (): Promise<SamMaskResult[]> => [
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 0.8,
+        },
+      ]
     ),
     terminate: vi.fn(),
     ...overrides,
@@ -126,7 +130,7 @@ describe("useSegmentation", () => {
       score: 0.8,
     };
     const client = createFakeClient({
-      segmentAtPoints: vi.fn(async () => mockMask),
+      segmentAtPoints: vi.fn(async () => [mockMask]),
     });
 
     const { result } = renderHook(() => useSegmentation(client));
@@ -168,7 +172,7 @@ describe("useSegmentation", () => {
   });
 
   it("Case 10: 🔴 selectAt の待機中に setImage が来たら古いマスクを表示しない", async () => {
-    const segmentDeferred = createDeferred<SamMaskResult>();
+    const segmentDeferred = createDeferred<SamMaskResult[]>();
     const client = createFakeClient({
       segment: vi.fn(() => segmentDeferred.promise),
     });
@@ -189,12 +193,14 @@ describe("useSegmentation", () => {
     });
 
     await act(async () => {
-      segmentDeferred.resolve({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 0.8,
-      });
+      segmentDeferred.resolve([
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 0.8,
+        },
+      ]);
       await selectPromise;
     });
 
@@ -286,7 +292,7 @@ describe("useSegmentation", () => {
   });
 
   it("Case 9b-15: addPoint 中に clearPoints されると（世代が進むと）結果を state に反映しない", async () => {
-    const segmentDeferred = createDeferred<SamMaskResult>();
+    const segmentDeferred = createDeferred<SamMaskResult[]>();
     const client = createFakeClient({
       segmentAtPoints: vi.fn(() => segmentDeferred.promise),
     });
@@ -307,12 +313,14 @@ describe("useSegmentation", () => {
     });
 
     await act(async () => {
-      segmentDeferred.resolve({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 0.8,
-      });
+      segmentDeferred.resolve([
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 0.8,
+        },
+      ]);
       await addPointPromise;
     });
 
@@ -379,7 +387,7 @@ describe("useSegmentation", () => {
       score: 0.8,
     };
     const client = createFakeClient({
-      segmentAtPoints: vi.fn(async () => mockMask),
+      segmentAtPoints: vi.fn(async () => [mockMask]),
     });
     const { result } = renderHook(() => useSegmentation(client));
 
@@ -450,8 +458,8 @@ describe("useSegmentation", () => {
     };
     const segmentAtPointsMock = vi
       .fn()
-      .mockResolvedValueOnce(mask1)
-      .mockResolvedValueOnce(mask2);
+      .mockResolvedValueOnce([mask1])
+      .mockResolvedValueOnce([mask2]);
 
     const client = createFakeClient({
       segmentAtPoints: segmentAtPointsMock,
@@ -498,8 +506,8 @@ describe("useSegmentation", () => {
     };
     const segmentAtPointsMock = vi
       .fn()
-      .mockResolvedValueOnce(mask1)
-      .mockResolvedValueOnce(mask2);
+      .mockResolvedValueOnce([mask1])
+      .mockResolvedValueOnce([mask2]);
 
     const client = createFakeClient({
       segmentAtPoints: segmentAtPointsMock,
@@ -602,9 +610,9 @@ describe("useSegmentation", () => {
     };
     const segmentAtPointsMock = vi
       .fn()
-      .mockResolvedValueOnce(mask1)
-      .mockResolvedValueOnce(mask2)
-      .mockResolvedValueOnce(mask3);
+      .mockResolvedValueOnce([mask1])
+      .mockResolvedValueOnce([mask2])
+      .mockResolvedValueOnce([mask3]);
 
     const client = createFakeClient({
       segmentAtPoints: segmentAtPointsMock,
@@ -649,5 +657,112 @@ describe("useSegmentation", () => {
 
     expect(result.current.layers).toHaveLength(2);
     expect(result.current.layers.map((l) => l.label)).toEqual(["レイヤー2", "レイヤー3"]);
+  });
+
+  it("Case 19-3: addPoint は client.segmentAtPoints が返した全候補を candidates に格納し、selectedCandidateIndex を 0 にする", async () => {
+    const candidateMasks: SamMaskResult[] = [
+      { data: new Uint8Array([1]), width: 1, height: 1, score: 0.9 },
+      { data: new Uint8Array([2]), width: 1, height: 1, score: 0.5 },
+      { data: new Uint8Array([3]), width: 1, height: 1, score: 0.3 },
+    ];
+    const client = createFakeClient({
+      segmentAtPoints: vi.fn(async () => candidateMasks),
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    expect(result.current.candidates).toHaveLength(3);
+    expect(result.current.candidates).toEqual(candidateMasks);
+    expect(result.current.selectedCandidateIndex).toBe(0);
+    expect(result.current.mask).toEqual(candidateMasks[0]);
+  });
+
+  it("Case 19-4: selectCandidate(index) で mask が切り替わる", async () => {
+    const candidateMasks: SamMaskResult[] = [
+      { data: new Uint8Array([1]), width: 1, height: 1, score: 0.9 },
+      { data: new Uint8Array([2]), width: 1, height: 1, score: 0.5 },
+      { data: new Uint8Array([3]), width: 1, height: 1, score: 0.3 },
+    ];
+    const client = createFakeClient({
+      segmentAtPoints: vi.fn(async () => candidateMasks),
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.selectCandidate(1);
+    });
+
+    expect(result.current.selectedCandidateIndex).toBe(1);
+    expect(result.current.mask).toEqual(candidateMasks[1]);
+  });
+
+  it("Case 19-5: selectCandidate に範囲外の index を渡しても何も変わらない", async () => {
+    const candidateMasks: SamMaskResult[] = [
+      { data: new Uint8Array([1]), width: 1, height: 1, score: 0.9 },
+      { data: new Uint8Array([2]), width: 1, height: 1, score: 0.5 },
+    ];
+    const client = createFakeClient({
+      segmentAtPoints: vi.fn(async () => candidateMasks),
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.selectCandidate(99);
+    });
+
+    expect(result.current.selectedCandidateIndex).toBe(0);
+    expect(result.current.mask).toEqual(candidateMasks[0]);
+  });
+
+  it("Case 19-6: 新しい addPoint 呼び出しで selectedCandidateIndex が 0 にリセットされる", async () => {
+    const firstCandidates: SamMaskResult[] = [
+      { data: new Uint8Array([1]), width: 1, height: 1, score: 0.9 },
+      { data: new Uint8Array([2]), width: 1, height: 1, score: 0.5 },
+    ];
+    const secondCandidates: SamMaskResult[] = [
+      { data: new Uint8Array([3]), width: 1, height: 1, score: 0.7 },
+      { data: new Uint8Array([4]), width: 1, height: 1, score: 0.4 },
+    ];
+    const segmentAtPointsMock = vi
+      .fn()
+      .mockResolvedValueOnce(firstCandidates)
+      .mockResolvedValueOnce(secondCandidates);
+    const client = createFakeClient({
+      segmentAtPoints: segmentAtPointsMock,
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1, { replace: false });
+    });
+
+    act(() => {
+      result.current.selectCandidate(1);
+    });
+
+    expect(result.current.selectedCandidateIndex).toBe(1);
+
+    await act(async () => {
+      await result.current.addPoint(30, 40, 1, { replace: false });
+    });
+
+    expect(result.current.selectedCandidateIndex).toBe(0);
+    expect(result.current.candidates).toEqual(secondCandidates);
+    expect(result.current.mask).toEqual(secondCandidates[0]);
   });
 });

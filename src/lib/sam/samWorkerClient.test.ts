@@ -77,18 +77,18 @@ describe("createSamWorkerClient", () => {
     worker.emit({
       id: "r2",
       type: "result",
-      payload: { width: 2, height: 2, score: 0.5, data: new Uint8Array([1]) },
+      payload: [{ width: 2, height: 2, score: 0.5, data: new Uint8Array([1]) }],
     });
     worker.emit({
       id: "r1",
       type: "result",
-      payload: { width: 1, height: 1, score: 0.1, data: new Uint8Array([0]) },
+      payload: [{ width: 1, height: 1, score: 0.1, data: new Uint8Array([0]) }],
     });
 
     const [firstResult, secondResult] = await Promise.all([first, second]);
 
-    expect(firstResult.score).toBe(0.1);
-    expect(secondResult.score).toBe(0.5);
+    expect(firstResult[0].score).toBe(0.1);
+    expect(secondResult[0].score).toBe(0.5);
   });
 
   it("Case 16: an error response rejects the associated promise", async () => {
@@ -212,19 +212,21 @@ describe("createSamWorkerClient", () => {
       points,
     });
 
-    const fakeMask = {
-      width: 2,
-      height: 2,
-      score: 0.95,
-      data: new Uint8Array([1, 0, 0, 1]),
-    };
+    const fakeMasks = [
+      {
+        width: 2,
+        height: 2,
+        score: 0.95,
+        data: new Uint8Array([1, 0, 0, 1]),
+      },
+    ];
     worker.emit({
       id: "sp1",
       type: "result",
-      payload: fakeMask,
+      payload: fakeMasks,
     });
 
     const result = await promise;
-    expect(result).toEqual(fakeMask);
+    expect(result).toEqual(fakeMasks);
   });
 });

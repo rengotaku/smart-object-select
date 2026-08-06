@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyMaskToImage,
   computeMaskBounds,
+  computeUnionBounds,
   cropRgbaPixels,
   maskToBlackAndWhite,
   type RgbaPixels,
@@ -177,6 +178,46 @@ describe("exportImage", () => {
 
       const result = computeMaskBounds(mask);
       expect(result).toEqual({ x: 3, y: 2, width: 1, height: 1 });
+    });
+  });
+
+  describe("computeUnionBounds", () => {
+    it("Case 19-11: 複数マスクの和集合のバウンディングボックスを返す", () => {
+      // 8x8 マスク。mask1 は (1,1)、mask2 は (5,6) だけ値1
+      const mask1Data = new Uint8Array(8 * 8);
+      mask1Data[1 * 8 + 1] = 1;
+      const mask2Data = new Uint8Array(8 * 8);
+      mask2Data[6 * 8 + 5] = 1;
+
+      const mask1: SamMaskResult = { data: mask1Data, width: 8, height: 8, score: 0.9 };
+      const mask2: SamMaskResult = { data: mask2Data, width: 8, height: 8, score: 0.5 };
+
+      const result = computeUnionBounds([mask1, mask2]);
+
+      expect(result).toEqual({ x: 1, y: 1, width: 5, height: 6 });
+    });
+
+    it("Case 19-12: 全マスクが空（bounds が全て null）なら null を返す", () => {
+      const emptyMask1: SamMaskResult = {
+        data: new Uint8Array(4 * 4),
+        width: 4,
+        height: 4,
+        score: 0.9,
+      };
+      const emptyMask2: SamMaskResult = {
+        data: new Uint8Array(4 * 4),
+        width: 4,
+        height: 4,
+        score: 0.5,
+      };
+
+      const result = computeUnionBounds([emptyMask1, emptyMask2]);
+
+      expect(result).toBeNull();
+    });
+
+    it("追加: masks が空配列なら null を返す", () => {
+      expect(computeUnionBounds([])).toBeNull();
     });
   });
 

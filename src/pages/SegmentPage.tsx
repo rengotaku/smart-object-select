@@ -8,7 +8,13 @@ import {
   Zap,
 } from "lucide-react";
 
-import { ExportBar, ImageDropzone, LayerPanel, SegmentCanvas } from "@/components";
+import {
+  CandidatePicker,
+  ExportBar,
+  ImageDropzone,
+  LayerPanel,
+  SegmentCanvas,
+} from "@/components";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -35,6 +41,8 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
     status: segStatus,
     image,
     mask,
+    candidates,
+    selectedCandidateIndex,
     points,
     layers,
     error: segError,
@@ -44,6 +52,7 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
     saveLayer,
     removeLayer,
     reset,
+    selectCandidate,
   } = useSegmentation(client);
 
   return (
@@ -158,6 +167,13 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
                 onPointClick={(x, y, label, options) =>
                   void addPoint(x, y, label, options)
                 }
+              />
+
+              <CandidatePicker
+                image={image}
+                candidates={candidates}
+                selectedIndex={selectedCandidateIndex}
+                onSelect={selectCandidate}
               />
 
               <ExportBar image={image} mask={mask} sourceFileName={image.sourceName} />

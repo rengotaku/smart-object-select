@@ -20,20 +20,24 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
     init: vi.fn(async (): Promise<SamDevice> => "wasm"),
     setImage: vi.fn(async (): Promise<void> => undefined),
     segment: vi.fn(
-      async (): Promise<SamMaskResult> => ({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 1,
-      })
+      async (): Promise<SamMaskResult[]> => [
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 1,
+        },
+      ]
     ),
     segmentAtPoints: vi.fn(
-      async (): Promise<SamMaskResult> => ({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 1,
-      })
+      async (): Promise<SamMaskResult[]> => [
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 1,
+        },
+      ]
     ),
     terminate: vi.fn(),
     ...overrides,
@@ -171,10 +175,10 @@ describe("SegmentPage", () => {
       height: 1,
       score: 0.8,
     };
-    const segmentDeferred = createDeferred<SamMaskResult>();
+    const segmentDeferred = createDeferred<SamMaskResult[]>();
     const segmentAtPointsMock = vi
       .fn()
-      .mockResolvedValueOnce(mask1)
+      .mockResolvedValueOnce([mask1])
       .mockImplementationOnce(() => segmentDeferred.promise);
 
     const client = createFakeClient({
@@ -226,7 +230,7 @@ describe("SegmentPage", () => {
     });
 
     await act(async () => {
-      segmentDeferred.resolve(mask1);
+      segmentDeferred.resolve([mask1]);
     });
   });
 });

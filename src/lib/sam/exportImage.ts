@@ -93,6 +93,40 @@ export function computeMaskBounds(
 }
 
 /**
+ * 複数マスクそれぞれの `computeMaskBounds` の和集合となるバウンディングボックスを計算する。
+ * masks が空、または全マスクが空（bounds が全て null）の場合は null を返す。
+ */
+export function computeUnionBounds(
+  masks: SamMaskResult[]
+): { x: number; y: number; width: number; height: number } | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const mask of masks) {
+    const bounds = computeMaskBounds(mask);
+    if (!bounds) continue;
+
+    if (bounds.x < minX) minX = bounds.x;
+    if (bounds.y < minY) minY = bounds.y;
+    if (bounds.x + bounds.width > maxX) maxX = bounds.x + bounds.width;
+    if (bounds.y + bounds.height > maxY) maxY = bounds.y + bounds.height;
+  }
+
+  if (maxX === -Infinity || maxY === -Infinity) {
+    return null;
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+/**
  * RgbaPixels から指定した bounds の矩形領域を切り出した新しい RgbaPixels を返す。
  */
 export function cropRgbaPixels(

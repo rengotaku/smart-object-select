@@ -20,8 +20,8 @@ export interface WorkerLike {
 export interface SamWorkerClient {
   init(): Promise<SamDevice>;
   setImage(image: SamImageInput): Promise<void>;
-  segment(x: number, y: number): Promise<SamMaskResult>;
-  segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult>;
+  segment(x: number, y: number): Promise<SamMaskResult[]>;
+  segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult[]>;
   terminate(): void;
 }
 
@@ -117,11 +117,11 @@ export function createSamWorkerClient(
     setImage(image: SamImageInput): Promise<void> {
       return send<void>({ id: idFactory(), type: "setImage", image });
     },
-    segment(x: number, y: number): Promise<SamMaskResult> {
-      return send<SamMaskResult>({ id: idFactory(), type: "segment", x, y });
+    segment(x: number, y: number): Promise<SamMaskResult[]> {
+      return send<SamMaskResult[]>({ id: idFactory(), type: "segment", x, y });
     },
-    segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult> {
-      return send<SamMaskResult>({ id: idFactory(), type: "segmentAtPoints", points });
+    segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult[]> {
+      return send<SamMaskResult[]>({ id: idFactory(), type: "segmentAtPoints", points });
     },
     terminate(): void {
       worker.removeEventListener("message", onMessage);

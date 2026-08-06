@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   createSamSession,
   binarizeMask,
+  binarizeAllMasks,
   pickBestMaskIndex,
   SamNoImageError,
   SamStaleRequestError,
@@ -71,12 +72,78 @@ describe("binarizeMask", () => {
   });
 });
 
+describe("binarizeAllMasks", () => {
+  it("binarizes every mask in the tensor and sorts them by score descending", () => {
+    const tensor: MaskTensorLike = {
+      data: new Uint8Array([
+        0,
+        0,
+        0,
+        0, // mask 0: all zero
+        255,
+        255,
+        255,
+        255, // mask 1: all one
+        255,
+        0,
+        255,
+        0, // mask 2: alternating
+      ]),
+      dims: [1, 3, 2, 2],
+    };
+    const iouScores = [[[0.1, 0.9, 0.5]]];
+
+    const result = binarizeAllMasks(tensor, iouScores);
+
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => r.score)).toEqual([0.9, 0.5, 0.1]);
+    expect(result[0].data).toEqual(new Uint8Array([1, 1, 1, 1]));
+    expect(result[1].data).toEqual(new Uint8Array([1, 0, 1, 0]));
+    expect(result[2].data).toEqual(new Uint8Array([0, 0, 0, 0]));
+    expect(result[0]).toMatchObject({ width: 2, height: 2 });
+  });
+
+  it("falls back to score 0 when iouScores does not cover an index", () => {
+    const tensor: MaskTensorLike = {
+      data: new Uint8Array([0, 255, 0, 255]),
+      dims: [1, 1, 2, 2],
+    };
+
+    const result = binarizeAllMasks(tensor, [[[]]]);
+
+    expect(result).toEqual([
+      { data: new Uint8Array([0, 1, 0, 1]), width: 2, height: 2, score: 0 },
+    ]);
+  });
+});
+
 describe("createSamSession", () => {
-  it("Case 5: setImage -> segmentAtPoint returns the binarized best-score mask", async () => {
+  it("Case 19-1: segmentAtPoint returns all candidates sorted by score descending", async () => {
     const processor = createFakeProcessor();
+    processor.postProcessMasks = vi.fn(
+      async (): Promise<MaskTensorLike[]> => [
+        {
+          data: new Uint8Array([
+            0,
+            0,
+            0,
+            0, // mask 0
+            255,
+            255,
+            255,
+            255, // mask 1
+            255,
+            0,
+            255,
+            0, // mask 2
+          ]),
+          dims: [1, 3, 2, 2],
+        },
+      ]
+    );
     const model: SamModelLike = {
       getImageEmbeddings: vi.fn(async () => ({ embedding: "e" })),
-      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.1, 0.9, 0.5]]] })),
     };
     const runtime: SamRuntime = {
       loadModel: vi.fn(async () => model),
@@ -87,11 +154,13 @@ describe("createSamSession", () => {
     await session.setImage(image);
     const result = await session.segmentAtPoint(1, 1);
 
-    expect(result).toEqual({
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => r.score)).toEqual([0.9, 0.5, 0.1]);
+    expect(result[0]).toEqual({
       width: 2,
       height: 2,
       score: 0.9,
-      data: new Uint8Array([0, 1, 0, 1]),
+      data: new Uint8Array([1, 1, 1, 1]),
     });
   });
 
@@ -473,7 +542,7 @@ describe("createSamSession", () => {
     expect(decodeArgs.input_labels).toEqual(fakeLabels);
   });
 
-  it("Case 9b-2: segmentAtPoints は最もスコアの高いマスクを返す（Case 5 の複数点版）", async () => {
+  it("Case 9b-2: segmentAtPoints は候補配列の先頭に最もスコアの高いマスクを返す（Case 5 の複数点版）", async () => {
     const processor = createFakeProcessor();
     const model: SamModelLike = {
       getImageEmbeddings: vi.fn(async () => ({ embedding: "e" })),
@@ -491,7 +560,8 @@ describe("createSamSession", () => {
       { x: 5, y: 5, label: 0 },
     ]);
 
-    expect(result).toEqual({
+    expect(result).toHaveLength(1);
+    expect(result[0]).toEqual({
       width: 2,
       height: 2,
       score: 0.9,
@@ -604,5 +674,54 @@ describe("createSamSession", () => {
     await expect(
       session.segmentAtPoints([{ x: 1, y: 1, label: 1 }])
     ).rejects.toBeInstanceOf(SamDisposedError);
+  });
+
+  it("Case 19-2: segmentAtPoints は全候補を score 降順で返す", async () => {
+    const processor = createFakeProcessor();
+    processor.postProcessMasks = vi.fn(
+      async (): Promise<MaskTensorLike[]> => [
+        {
+          data: new Uint8Array([
+            0,
+            0,
+            0,
+            0, // mask 0
+            255,
+            255,
+            255,
+            255, // mask 1
+            255,
+            0,
+            255,
+            0, // mask 2
+          ]),
+          dims: [1, 3, 2, 2],
+        },
+      ]
+    );
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({ embedding: "e" })),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.1, 0.9, 0.5]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+    const result = await session.segmentAtPoints([
+      { x: 1, y: 1, label: 1 },
+      { x: 5, y: 5, label: 0 },
+    ]);
+
+    expect(result).toHaveLength(3);
+    expect(result.map((r) => r.score)).toEqual([0.9, 0.5, 0.1]);
+    expect(result[0]).toEqual({
+      width: 2,
+      height: 2,
+      score: 0.9,
+      data: new Uint8Array([1, 1, 1, 1]),
+    });
   });
 });
