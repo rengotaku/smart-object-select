@@ -340,4 +340,34 @@ describe("useSegmentation", () => {
     expect(result.current.mask).toBeNull();
     expect(result.current.image).toEqual(sampleImageA);
   });
+
+  it("Case 9b-17: setImage が preparing 中に clearPoints を呼んでも状態を変更しない", async () => {
+    const deferred = createDeferred<void>();
+    const client = createFakeClient({
+      setImage: vi.fn(() => deferred.promise),
+    });
+
+    const { result } = renderHook(() => useSegmentation(client));
+
+    let setImagePromise!: Promise<void>;
+    act(() => {
+      setImagePromise = result.current.setImage(sampleImageA);
+    });
+
+    expect(result.current.status).toBe("preparing");
+
+    act(() => {
+      result.current.clearPoints();
+    });
+
+    expect(result.current.status).toBe("preparing");
+
+    await act(async () => {
+      deferred.resolve();
+      await setImagePromise;
+    });
+
+    expect(result.current.status).toBe("ready");
+    expect(result.current.image).toEqual(sampleImageA);
+  });
 });

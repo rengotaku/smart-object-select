@@ -58,6 +58,9 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
   }, []);
 
   const clearPoints = useCallback(() => {
+    if (statusRef.current === "preparing" || statusRef.current === "idle") {
+      return;
+    }
     generationRef.current++;
     pointsRef.current = [];
     setPoints([]);
