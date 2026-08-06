@@ -127,18 +127,45 @@ export function computeUnionBounds(
   };
 }
 
+/** サムネイル合成の出力解像度の上限（px）。表示は CSS で縮小されるだけなので、
+ * 合成計算自体をこのサイズに収めることで crop 領域や元画像の解像度に依存しない計算量にする。 */
+export const THUMBNAIL_MAX_SIZE = 160;
+
+/**
+ * bounds のアスペクト比を保ったまま、幅・高さともに maxSize 以下に収まる出力サイズを計算する。
+ * bounds が既に maxSize 以下ならそのままのサイズを返す。
+ */
+export function computeThumbnailOutputSize(
+  bounds: { width: number; height: number },
+  maxSize: number = THUMBNAIL_MAX_SIZE
+): { width: number; height: number } {
+  const { width, height } = bounds;
+  if (width <= maxSize && height <= maxSize) {
+    return { width, height };
+  }
+
+  const scale = Math.min(maxSize / width, maxSize / height);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
 /**
  * 元画像の bounds 内だけを対象に、マスクのオーバーレイ色をアルファブレンドした RGBA を返す。
  * image と mask の寸法が一致しない場合は Error を throw する。
  *
- * 画像全体サイズの一時バッファは確保せず、計算量は bounds の面積（width * height）に比例する
- * （高解像度画像で候補ごとにフルサイズの一時アロケーションが発生するのを避けるための実装）。
+ * 画像全体サイズの一時バッファは確保せず、計算量は出力サイズ（outputSize。省略時は bounds と同じ）
+ * の面積（width * height）に比例する。outputSize を bounds より小さく指定すると、出力グリッド側から
+ * nearest-neighbor でサンプリングするため、bounds の面積や元画像の解像度に関わらず計算量を一定に抑えられる
+ * （高解像度画像で候補ごとにフルサイズ・crop 原寸の一時アロケーションが発生するのを避けるための実装）。
  */
 export function composeMaskOverlayInBounds(
   image: SamImageInput,
   mask: SamMaskResult,
   bounds: { x: number; y: number; width: number; height: number },
-  color: OverlayColor
+  color: OverlayColor,
+  outputSize?: { width: number; height: number }
 ): RgbaPixels {
   if (image.width !== mask.width || image.height !== mask.height) {
     throw new Error(
@@ -146,16 +173,19 @@ export function composeMaskOverlayInBounds(
     );
   }
 
-  const data = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+  const outWidth = outputSize?.width ?? bounds.width;
+  const outHeight = outputSize?.height ?? bounds.height;
+
+  const data = new Uint8ClampedArray(outWidth * outHeight * 4);
   const alpha = color.a / 255;
 
-  for (let y = 0; y < bounds.height; y++) {
-    const srcY = bounds.y + y;
-    for (let x = 0; x < bounds.width; x++) {
-      const srcX = bounds.x + x;
+  for (let outY = 0; outY < outHeight; outY++) {
+    const srcY = bounds.y + Math.floor((outY * bounds.height) / outHeight);
+    for (let outX = 0; outX < outWidth; outX++) {
+      const srcX = bounds.x + Math.floor((outX * bounds.width) / outWidth);
       const srcIndex = srcY * image.width + srcX;
       const srcOffset = srcIndex * 4;
-      const destOffset = (y * bounds.width + x) * 4;
+      const destOffset = (outY * outWidth + outX) * 4;
 
       if (mask.data[srcIndex] > 0) {
         data[destOffset] = color.r * alpha + image.data[srcOffset] * (1 - alpha);
@@ -171,7 +201,7 @@ export function composeMaskOverlayInBounds(
     }
   }
 
-  return { data, width: bounds.width, height: bounds.height };
+  return { data, width: outWidth, height: outHeight };
 }
 
 /**

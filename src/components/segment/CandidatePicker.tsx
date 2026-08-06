@@ -1,5 +1,9 @@
 import { useEffect, useRef } from "react";
-import { composeMaskOverlayInBounds, computeUnionBounds } from "@/lib/sam/exportImage";
+import {
+  composeMaskOverlayInBounds,
+  computeThumbnailOutputSize,
+  computeUnionBounds,
+} from "@/lib/sam/exportImage";
 import type { OverlayColor } from "@/lib/sam/maskOverlay";
 import { cn } from "@/lib/utils";
 import type { SamImageInput, SamMaskResult } from "@/lib/sam";
@@ -72,11 +76,13 @@ function CandidateItem({
     if (!ctx) return;
 
     try {
+      const outputSize = computeThumbnailOutputSize(cropBounds);
       const composed = composeMaskOverlayInBounds(
         image,
         candidate,
         cropBounds,
-        OVERLAY_COLOR
+        OVERLAY_COLOR,
+        outputSize
       );
 
       canvas.width = composed.width;

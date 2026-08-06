@@ -3,6 +3,7 @@ import {
   applyMaskToImage,
   composeMaskOverlayInBounds,
   computeMaskBounds,
+  computeThumbnailOutputSize,
   computeUnionBounds,
   cropRgbaPixels,
   maskToBlackAndWhite,
@@ -334,6 +335,53 @@ describe("exportImage", () => {
           { r: 0, g: 255, b: 0, a: 255 }
         )
       ).toThrow();
+    });
+
+    it("Case 19-14: 出力サイズが上限を超える crop bounds はダウンスケールして合成される（境界ピクセルが元画像と整合する）", () => {
+      const width = 1000;
+      const height = 500;
+      const data = new Uint8ClampedArray(width * height * 4);
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const offset = (y * width + x) * 4;
+          data[offset] = x % 256; // R = x 座標（mod 256）
+          data[offset + 1] = y % 256; // G = y 座標（mod 256）
+          data[offset + 2] = 0;
+          data[offset + 3] = 255;
+        }
+      }
+      const image: SamImageInput = { data, width, height };
+      // マスクは全て 0（アンマスク）にして、元画像がそのままコピーされることを利用し座標整合を検証する
+      const mask: SamMaskResult = {
+        data: new Uint8Array(width * height),
+        width,
+        height,
+        score: 1,
+      };
+      const bounds = { x: 0, y: 0, width: 1000, height: 500 };
+      const color = { r: 0, g: 255, b: 0, a: 255 };
+
+      const outputSize = computeThumbnailOutputSize(bounds);
+      // 1000x500 は上限 160 を超えるので、アスペクト比を保って 160x80 にダウンスケールされる
+      expect(outputSize).toEqual({ width: 160, height: 80 });
+
+      const result = composeMaskOverlayInBounds(image, mask, bounds, color, outputSize);
+
+      // 計算量が出力サイズに比例することの確認（bounds/元画像解像度ではなく出力サイズでバッファが確保される）
+      expect(result.width).toBe(160);
+      expect(result.height).toBe(80);
+      expect(result.data.length).toBe(160 * 80 * 4);
+
+      // 左上角: 出力 (0,0) は元画像の (0,0) に対応する
+      expect(result.data[0]).toBe(0);
+      expect(result.data[1]).toBe(0);
+
+      // 右下角: 出力 (159,79) は nearest-neighbor で元画像の対応座標に整合する
+      const expectedSrcX = Math.floor((159 * bounds.width) / outputSize.width);
+      const expectedSrcY = Math.floor((79 * bounds.height) / outputSize.height);
+      const lastOffset = (79 * 160 + 159) * 4;
+      expect(result.data[lastOffset]).toBe(expectedSrcX % 256);
+      expect(result.data[lastOffset + 1]).toBe(expectedSrcY % 256);
     });
   });
 });
