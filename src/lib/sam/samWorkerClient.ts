@@ -1,5 +1,5 @@
 import type { SamDevice } from "./device";
-import type { SamImageInput, SamMaskResult } from "./types";
+import type { SamImageInput, SamMaskResult, SegmentPoint } from "./types";
 import type { SamWorkerRequest, SamWorkerResponse } from "./protocol";
 
 type WorkerEventType = "message" | "error" | "messageerror";
@@ -21,6 +21,7 @@ export interface SamWorkerClient {
   init(): Promise<SamDevice>;
   setImage(image: SamImageInput): Promise<void>;
   segment(x: number, y: number): Promise<SamMaskResult>;
+  segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult>;
   terminate(): void;
 }
 
@@ -118,6 +119,9 @@ export function createSamWorkerClient(
     },
     segment(x: number, y: number): Promise<SamMaskResult> {
       return send<SamMaskResult>({ id: idFactory(), type: "segment", x, y });
+    },
+    segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult> {
+      return send<SamMaskResult>({ id: idFactory(), type: "segmentAtPoints", points });
     },
     terminate(): void {
       worker.removeEventListener("message", onMessage);

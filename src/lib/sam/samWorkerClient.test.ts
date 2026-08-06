@@ -195,4 +195,36 @@ describe("createSamWorkerClient", () => {
     await expect(segmentRequest).rejects.toThrow();
     expect(worker.sent.length).toBe(sentCountAfterTerminate);
   });
+
+  it("segmentAtPoints のリクエストが正しく postMessage されレスポンスで resolve される", async () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "sp1");
+
+    const points = [
+      { x: 10, y: 20, label: 1 as const },
+      { x: 30, y: 40, label: 0 as const },
+    ];
+    const promise = client.segmentAtPoints(points);
+
+    expect(worker.sent[0]).toEqual({
+      id: "sp1",
+      type: "segmentAtPoints",
+      points,
+    });
+
+    const fakeMask = {
+      width: 2,
+      height: 2,
+      score: 0.95,
+      data: new Uint8Array([1, 0, 0, 1]),
+    };
+    worker.emit({
+      id: "sp1",
+      type: "result",
+      payload: fakeMask,
+    });
+
+    const result = await promise;
+    expect(result).toEqual(fakeMask);
+  });
 });

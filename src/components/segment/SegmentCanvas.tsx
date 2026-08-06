@@ -3,16 +3,30 @@ import { Loader2 } from "lucide-react";
 import type { LoadedImage, SegmentationStatus } from "@/hooks";
 import { toImageCoords } from "@/lib/sam/coords";
 import { maskToOverlayPixels } from "@/lib/sam/maskOverlay";
-import type { SamMaskResult } from "@/lib/sam";
+import type { SamMaskResult, SegmentPoint } from "@/lib/sam";
 
 export interface SegmentCanvasProps {
   image: LoadedImage | null;
   mask: SamMaskResult | null;
   status: SegmentationStatus;
-  onSelect: (x: number, y: number) => void;
+  points?: SegmentPoint[];
+  onPointClick?: (
+    x: number,
+    y: number,
+    label: 0 | 1,
+    options: { replace: boolean }
+  ) => void;
+  onSelect?: (x: number, y: number) => void;
 }
 
-export function SegmentCanvas({ image, mask, status, onSelect }: SegmentCanvasProps) {
+export function SegmentCanvas({
+  image,
+  mask,
+  status,
+  points = [],
+  onPointClick,
+  onSelect,
+}: SegmentCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   useEffect(() => {
@@ -45,7 +59,19 @@ export function SegmentCanvas({ image, mask, status, onSelect }: SegmentCanvasPr
         ctx.drawImage(offscreen, 0, 0);
       }
     }
-  }, [image, mask]);
+
+    if (points && points.length > 0) {
+      for (const pt of points) {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 4, 0, 2 * Math.PI);
+        ctx.fillStyle = pt.label === 1 ? "#22c55e" : "#ef4444";
+        ctx.fill();
+        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = "#ffffff";
+        ctx.stroke();
+      }
+    }
+  }, [image, mask, points]);
 
   const handleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (!image || status !== "ready") return;
@@ -60,7 +86,26 @@ export function SegmentCanvas({ image, mask, status, onSelect }: SegmentCanvasPr
     });
 
     if (coords) {
-      onSelect(coords.x, coords.y);
+      let label: 0 | 1 = 1;
+      let replace = true;
+
+      if (e.shiftKey) {
+        label = 1;
+        replace = false;
+      } else if (e.altKey) {
+        label = 0;
+        replace = false;
+      } else {
+        label = 1;
+        replace = true;
+      }
+
+      if (onPointClick) {
+        onPointClick(coords.x, coords.y, label, { replace });
+      }
+      if (onSelect) {
+        onSelect(coords.x, coords.y);
+      }
     }
   };
 

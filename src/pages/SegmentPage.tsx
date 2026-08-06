@@ -1,4 +1,4 @@
-import { AlertTriangle, Cpu, Loader2, RefreshCw, Zap } from "lucide-react";
+import { AlertTriangle, Cpu, Loader2, RefreshCw, RotateCcw, Zap } from "lucide-react";
 
 import { ExportBar, ImageDropzone, SegmentCanvas } from "@/components";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -27,9 +27,11 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
     status: segStatus,
     image,
     mask,
+    points,
     error: segError,
     setImage,
-    selectAt,
+    addPoint,
+    clearPoints,
     reset,
   } = useSegmentation(client);
 
@@ -114,19 +116,28 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
             <div className="space-y-4">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-muted-foreground">
-                  クリックして対象のオブジェクトを選択してください
+                  クリックして対象を選択、Shift+クリックで追加、Alt+クリックで除外できます
                 </span>
-                <Button variant="outline" size="sm" onClick={reset}>
-                  <RefreshCw className="mr-2 size-4" />
-                  別の画像を選ぶ
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="outline" size="sm" onClick={clearPoints}>
+                    <RotateCcw className="mr-2 size-4" />
+                    選択をやり直す
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={reset}>
+                    <RefreshCw className="mr-2 size-4" />
+                    別の画像を選ぶ
+                  </Button>
+                </div>
               </div>
 
               <SegmentCanvas
                 image={image}
                 mask={mask}
                 status={segStatus}
-                onSelect={(x, y) => void selectAt(x, y)}
+                points={points}
+                onPointClick={(x, y, label, options) =>
+                  void addPoint(x, y, label, options)
+                }
               />
 
               <ExportBar image={image} mask={mask} sourceFileName={image.sourceName} />

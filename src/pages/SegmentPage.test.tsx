@@ -15,6 +15,14 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
         score: 1,
       })
     ),
+    segmentAtPoints: vi.fn(
+      async (): Promise<SamMaskResult> => ({
+        data: new Uint8Array([1]),
+        width: 1,
+        height: 1,
+        score: 1,
+      })
+    ),
     terminate: vi.fn(),
     ...overrides,
   };

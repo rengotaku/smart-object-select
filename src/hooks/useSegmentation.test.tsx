@@ -30,6 +30,14 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
         score: 0.8,
       })
     ),
+    segmentAtPoints: vi.fn(
+      async (): Promise<SamMaskResult> => ({
+        data: new Uint8Array([1]),
+        width: 1,
+        height: 1,
+        score: 0.8,
+      })
+    ),
     terminate: vi.fn(),
     ...overrides,
   };
@@ -118,7 +126,7 @@ describe("useSegmentation", () => {
       score: 0.8,
     };
     const client = createFakeClient({
-      segment: vi.fn(async () => mockMask),
+      segmentAtPoints: vi.fn(async () => mockMask),
     });
 
     const { result } = renderHook(() => useSegmentation(client));
@@ -131,7 +139,11 @@ describe("useSegmentation", () => {
       await result.current.selectAt(5, 5);
     });
 
-    expect(client.segment).toHaveBeenCalledWith(5, 5);
+    // selectAt は addPoint(x, y, 1, { replace: true }) の薄いラッパーに統合された
+    // （issue #9 STEP2）。実際の呼び出し先は client.segmentAtPoints に変わったため、
+    // 「selectAt でマスクがセットされる」という保証はそのままに、検証対象のメソッドを
+    // 追従させる。
+    expect(client.segmentAtPoints).toHaveBeenCalledWith([{ x: 5, y: 5, label: 1 }]);
     expect(result.current.mask).toEqual(mockMask);
     expect(result.current.status).toBe("ready");
   });
@@ -232,5 +244,100 @@ describe("useSegmentation", () => {
     unmount();
 
     expect(revokeObjectURLSpy).toHaveBeenCalledWith("blob:imageA");
+  });
+
+  it("Case 9b-13: addPoint(replace:true) は既存の点セットをクリアしてから1点で segmentAtPoints を呼ぶ", async () => {
+    const client = createFakeClient();
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1, { replace: false });
+    });
+
+    expect(result.current.points).toEqual([{ x: 10, y: 20, label: 1 }]);
+
+    await act(async () => {
+      await result.current.addPoint(30, 40, 0, { replace: true });
+    });
+
+    expect(client.segmentAtPoints).toHaveBeenLastCalledWith([{ x: 30, y: 40, label: 0 }]);
+    expect(result.current.points).toEqual([{ x: 30, y: 40, label: 0 }]);
+  });
+
+  it("Case 9b-14: addPoint(replace:false) は既存の点セットに追加してから全点で segmentAtPoints を呼ぶ", async () => {
+    const client = createFakeClient();
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1, { replace: false });
+      await result.current.addPoint(30, 40, 0, { replace: false });
+    });
+
+    expect(client.segmentAtPoints).toHaveBeenLastCalledWith([
+      { x: 10, y: 20, label: 1 },
+      { x: 30, y: 40, label: 0 },
+    ]);
+    expect(result.current.points).toEqual([
+      { x: 10, y: 20, label: 1 },
+      { x: 30, y: 40, label: 0 },
+    ]);
+  });
+
+  it("Case 9b-15: addPoint 中に clearPoints されると（世代が進むと）結果を state に反映しない", async () => {
+    const segmentDeferred = createDeferred<SamMaskResult>();
+    const client = createFakeClient({
+      segmentAtPoints: vi.fn(() => segmentDeferred.promise),
+    });
+
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+    });
+
+    let addPointPromise!: Promise<void>;
+    act(() => {
+      addPointPromise = result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.clearPoints();
+    });
+
+    await act(async () => {
+      segmentDeferred.resolve({
+        data: new Uint8Array([1]),
+        width: 1,
+        height: 1,
+        score: 0.8,
+      });
+      await addPointPromise;
+    });
+
+    expect(result.current.mask).toBeNull();
+    expect(result.current.points).toEqual([]);
+  });
+
+  it("Case 9b-16: clearPoints は points と mask をクリアする（image は保持する）", async () => {
+    const client = createFakeClient();
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    expect(result.current.mask).not.toBeNull();
+    expect(result.current.points).toHaveLength(1);
+
+    act(() => {
+      result.current.clearPoints();
+    });
+
+    expect(result.current.points).toEqual([]);
+    expect(result.current.mask).toBeNull();
+    expect(result.current.image).toEqual(sampleImageA);
   });
 });
