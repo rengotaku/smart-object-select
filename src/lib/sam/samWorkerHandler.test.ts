@@ -20,6 +20,7 @@ function createFakeProcessor(): SamProcessorLike {
       })
     ),
     reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+    addInputLabels: vi.fn(() => [[1, 0]]),
     postProcessMasks: vi.fn(
       async (): Promise<MaskTensorLike[]> => [
         { data: new Uint8Array([0, 255, 0, 255]), dims: [1, 1, 2, 2] },
@@ -100,5 +101,26 @@ describe("createSamWorkerHandler", () => {
 
     expect(response.type).toBe("error");
     expect(response.id).toBe("d4");
+  });
+
+  it("segmentAtPoints リクエストを処理してマスク結果を返す", async () => {
+    const handler = createSamWorkerHandler(createFakeRuntime());
+    await handler.handle({ id: "init-1", type: "init" });
+    await handler.handle({ id: "set-1", type: "setImage", image });
+
+    const response = await handler.handle({
+      id: "sp-1",
+      type: "segmentAtPoints",
+      points: [
+        { x: 1, y: 1, label: 1 },
+        { x: 2, y: 2, label: 0 },
+      ],
+    });
+
+    expect(response).toEqual({
+      id: "sp-1",
+      type: "result",
+      payload: { width: 2, height: 2, score: 0.9, data: new Uint8Array([0, 1, 0, 1]) },
+    });
   });
 });

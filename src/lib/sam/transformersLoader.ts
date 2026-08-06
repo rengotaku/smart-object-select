@@ -44,6 +44,13 @@ interface TransformersSamProcessor {
     originalSizes: unknown,
     reshapedInputSizes: unknown
   ): unknown;
+  // `SamProcessor`（AutoProcessor.from_pretrained が返すファサード）は
+  // reshape_input_points/post_process_masks は image_processor へ委譲するが、
+  // add_input_labels は委譲しない（node_modules/@huggingface/transformers/src/models/sam/processing_sam.js
+  // で実読して確認済み）。そのため image_processor 側を直接呼ぶ必要がある。
+  image_processor?: {
+    add_input_labels(labels: unknown, inputPoints: unknown): unknown;
+  };
 }
 
 function toRawImage(image: SamImageInput): RawImage {
@@ -77,6 +84,15 @@ function wrapProcessor(processor: TransformersSamProcessor): SamProcessorLike {
         inputs.originalSizes,
         inputs.reshapedInputSizes
       );
+    },
+    addInputLabels(labels, reshapedInputPoints) {
+      const imageProcessor = processor.image_processor;
+      if (!imageProcessor) {
+        throw new Error(
+          "SamProcessor.image_processor is unavailable; cannot build input_labels"
+        );
+      }
+      return imageProcessor.add_input_labels(labels, reshapedInputPoints);
     },
     async postProcessMasks(predMasks, originalSizes, reshapedInputSizes) {
       const masks = await processor.post_process_masks(

@@ -12,3 +12,10 @@ export interface SamMaskResult {
   height: number;
   score: number;
 }
+
+/** セグメンテーション指示用の座標とラベル（1: positive, 0: negative） */
+export interface SegmentPoint {
+  x: number;
+  y: number;
+  label: 0 | 1;
+}

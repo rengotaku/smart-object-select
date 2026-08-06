@@ -4,7 +4,10 @@ import {
   type SamImageInput,
   type SamMaskResult,
   type SamWorkerClient,
+  type SegmentPoint,
 } from "@/lib/sam";
+
+export type { SegmentPoint } from "@/lib/sam";
 
 export interface LoadedImage extends SamImageInput {
   objectUrl: string;
@@ -18,9 +21,17 @@ export interface UseSegmentationResult {
   status: SegmentationStatus;
   image: LoadedImage | null;
   mask: SamMaskResult | null;
+  points: SegmentPoint[];
   error: Error | null;
   setImage(image: LoadedImage): Promise<void>;
   selectAt(x: number, y: number): Promise<void>;
+  addPoint(
+    x: number,
+    y: number,
+    label?: 0 | 1,
+    options?: { replace?: boolean }
+  ): Promise<void>;
+  clearPoints(): void;
   reset(): void;
 }
 
@@ -28,11 +39,13 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
   const [status, setStatus] = useState<SegmentationStatus>("idle");
   const [image, setImageState] = useState<LoadedImage | null>(null);
   const [mask, setMask] = useState<SamMaskResult | null>(null);
+  const [points, setPoints] = useState<SegmentPoint[]>([]);
   const [error, setError] = useState<Error | null>(null);
 
   const generationRef = useRef<number>(0);
   const statusRef = useRef<SegmentationStatus>("idle");
   const imageRef = useRef<LoadedImage | null>(null);
+  const pointsRef = useRef<SegmentPoint[]>([]);
 
   useEffect(() => {
     return () => {
@@ -44,6 +57,21 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     };
   }, []);
 
+  const clearPoints = useCallback(() => {
+    if (statusRef.current === "preparing" || statusRef.current === "idle") {
+      return;
+    }
+    generationRef.current++;
+    pointsRef.current = [];
+    setPoints([]);
+    setMask(null);
+    setError(null);
+    if (imageRef.current) {
+      statusRef.current = "ready";
+      setStatus("ready");
+    }
+  }, []);
+
   const reset = useCallback(() => {
     generationRef.current++;
     if (imageRef.current?.objectUrl) {
@@ -52,9 +80,11 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
       }
     }
     imageRef.current = null;
+    pointsRef.current = [];
     statusRef.current = "idle";
     setImageState(null);
     setMask(null);
+    setPoints([]);
     setError(null);
     setStatus("idle");
   }, []);
@@ -74,6 +104,8 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
 
       imageRef.current = newImage;
       setImageState(newImage);
+      pointsRef.current = [];
+      setPoints([]);
       setMask(null);
       setError(null);
       statusRef.current = "preparing";
@@ -106,8 +138,13 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     [client]
   );
 
-  const selectAt = useCallback(
-    async (x: number, y: number): Promise<void> => {
+  const addPoint = useCallback(
+    async (
+      x: number,
+      y: number,
+      label: 0 | 1 = 1,
+      options?: { replace?: boolean }
+    ): Promise<void> => {
       if (!client) {
         return;
       }
@@ -116,12 +153,20 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
         return;
       }
 
+      const replace = options?.replace ?? false;
+      const newPoints: SegmentPoint[] = replace
+        ? [{ x, y, label }]
+        : [...pointsRef.current, { x, y, label }];
+
+      pointsRef.current = newPoints;
+      setPoints(newPoints);
+
       const currentGen = generationRef.current;
       statusRef.current = "segmenting";
       setStatus("segmenting");
 
       try {
-        const resultMask = await client.segment(x, y);
+        const resultMask = await client.segmentAtPoints(newPoints);
 
         if (generationRef.current === currentGen) {
           setMask(resultMask);
@@ -151,13 +196,23 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     [client]
   );
 
+  const selectAt = useCallback(
+    async (x: number, y: number): Promise<void> => {
+      return addPoint(x, y, 1, { replace: true });
+    },
+    [addPoint]
+  );
+
   return {
     status,
     image,
     mask,
+    points,
     error,
     setImage,
     selectAt,
+    addPoint,
+    clearPoints,
     reset,
   };
 }

@@ -6,6 +6,7 @@ import {
   SamNoImageError,
   SamStaleRequestError,
   SamDisposedError,
+  SamEmptyPointsError,
   type SamRuntime,
   type SamModelLike,
   type SamProcessorLike,
@@ -39,6 +40,7 @@ function createFakeProcessor(): SamProcessorLike {
       })
     ),
     reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+    addInputLabels: vi.fn(() => [[1, 0]]),
     postProcessMasks: vi.fn(
       async (): Promise<MaskTensorLike[]> => [
         { data: new Uint8Array([0, 255, 0, 255]), dims: [1, 1, 2, 2] },
@@ -307,8 +309,10 @@ describe("createSamSession", () => {
         })
       ),
       reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+      addInputLabels: vi.fn(() => [[1]]),
       postProcessMasks: vi.fn(() => postProcessDeferred.promise),
     };
+
     const model: SamModelLike = {
       getImageEmbeddings: vi.fn(async () => ({})),
       decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
@@ -381,8 +385,10 @@ describe("createSamSession", () => {
         })
       ),
       reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+      addInputLabels: vi.fn(() => [[1]]),
       postProcessMasks: vi.fn(() => postProcessDeferred.promise),
     };
+
     const model: SamModelLike = {
       getImageEmbeddings: vi.fn(async () => ({})),
       decode: vi.fn(() => decodeDeferred.promise),
@@ -415,5 +421,188 @@ describe("createSamSession", () => {
     ]);
 
     await expect(segmentPromise).rejects.toBeInstanceOf(SamStaleRequestError);
+  });
+
+  it("Case 9b-1: segmentAtPoints が全点の座標とラベルを input_points/input_labels として decode に渡す", async () => {
+    const fakeReshapedPoints = [
+      [
+        [1, 1],
+        [5, 5],
+      ],
+    ];
+    const fakeLabels = [[1, 0]];
+    const processor = createFakeProcessor();
+    processor.reshapeInputPoints = vi.fn(() => fakeReshapedPoints);
+    processor.addInputLabels = vi.fn(() => fakeLabels);
+
+    const decode = vi.fn(async (args: Record<string, unknown>) => {
+      void args;
+      return { predMasks: {}, iouScores: [[[0.9]]] };
+    });
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({ embedding: "e" })),
+      decode,
+    };
+
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+    await session.segmentAtPoints([
+      { x: 1, y: 1, label: 1 },
+      { x: 5, y: 5, label: 0 },
+    ]);
+
+    expect(processor.reshapeInputPoints).toHaveBeenCalledWith(
+      [
+        [
+          [1, 1],
+          [5, 5],
+        ],
+      ],
+      [2, 2],
+      expect.anything()
+    );
+    expect(processor.addInputLabels).toHaveBeenCalledWith([[1, 0]], fakeReshapedPoints);
+    expect(decode).toHaveBeenCalledTimes(1);
+    const decodeArgs = decode.mock.calls[0][0] as Record<string, unknown>;
+    expect(decodeArgs.input_points).toEqual(fakeReshapedPoints);
+    expect(decodeArgs.input_labels).toEqual(fakeLabels);
+  });
+
+  it("Case 9b-2: segmentAtPoints は最もスコアの高いマスクを返す（Case 5 の複数点版）", async () => {
+    const processor = createFakeProcessor();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({ embedding: "e" })),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+    const result = await session.segmentAtPoints([
+      { x: 1, y: 1, label: 1 },
+      { x: 5, y: 5, label: 0 },
+    ]);
+
+    expect(result).toEqual({
+      width: 2,
+      height: 2,
+      score: 0.9,
+      data: new Uint8Array([0, 1, 0, 1]),
+    });
+  });
+
+  it("Case 9b-3: segmentAtPoints は setImage と embedding を共有する（Case 6 の複数点版）", async () => {
+    const processor = createFakeProcessor();
+    const getImageEmbeddings = vi.fn(async () => ({ embedding: "e" }));
+    const model: SamModelLike = {
+      getImageEmbeddings,
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+    await session.segmentAtPoint(1, 1);
+    await session.segmentAtPoints([
+      { x: 1, y: 1, label: 1 },
+      { x: 5, y: 5, label: 0 },
+    ]);
+    await session.segmentAtPoint(2, 2);
+
+    expect(getImageEmbeddings).toHaveBeenCalledTimes(1);
+  });
+
+  it("Case 9b-4: 空配列で segmentAtPoints を呼ぶと SamEmptyPointsError で reject する", async () => {
+    const processor = createFakeProcessor();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    await expect(session.segmentAtPoints([])).rejects.toBeInstanceOf(SamEmptyPointsError);
+  });
+
+  it("Case 9b-5: setImage 前の segmentAtPoints は SamNoImageError で reject する（Case 8 の複数点版）", async () => {
+    const processor = createFakeProcessor();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+
+    await expect(
+      session.segmentAtPoints([{ x: 1, y: 1, label: 1 }])
+    ).rejects.toBeInstanceOf(SamNoImageError);
+  });
+
+  it("Case 9b-6: decode 待機中に新しい setImage が来たら segmentAtPoints は SamStaleRequestError で reject する（Case 10 の複数点版）", async () => {
+    const processor = createFakeProcessor();
+    const decodeDeferred = deferred<{ predMasks: unknown; iouScores: number[][][] }>();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(() => decodeDeferred.promise),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+    const imageB: SamImageInput = {
+      data: new Uint8ClampedArray(16),
+      width: 3,
+      height: 3,
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    const segmentPromise = session.segmentAtPoints([{ x: 1, y: 1, label: 1 }]);
+    await session.setImage(imageB);
+    decodeDeferred.resolve({ predMasks: {}, iouScores: [[[0.9]]] });
+
+    await expect(segmentPromise).rejects.toBeInstanceOf(SamStaleRequestError);
+  });
+
+  it("Case 9b-7: dispose 後の segmentAtPoints は SamDisposedError で reject する（Case 11 の複数点版）", async () => {
+    const processor = createFakeProcessor();
+    const model: SamModelLike = {
+      getImageEmbeddings: vi.fn(async () => ({})),
+      decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[0.9]]] })),
+    };
+    const runtime: SamRuntime = {
+      loadModel: vi.fn(async () => model),
+      loadProcessor: vi.fn(async () => processor),
+    };
+
+    const session = await createSamSession(runtime, "wasm");
+    await session.setImage(image);
+
+    session.dispose();
+
+    await expect(
+      session.segmentAtPoints([{ x: 1, y: 1, label: 1 }])
+    ).rejects.toBeInstanceOf(SamDisposedError);
   });
 });

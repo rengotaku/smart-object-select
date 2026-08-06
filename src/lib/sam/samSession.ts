@@ -1,5 +1,5 @@
 import type { SamDevice } from "./device";
-import type { SamImageInput, SamMaskResult } from "./types";
+import type { SamImageInput, SamMaskResult, SegmentPoint } from "./types";
 
 export interface SamImageInputs {
   originalSizes: unknown;
@@ -26,6 +26,7 @@ export interface SamProcessorLike {
     imageSize: [number, number],
     inputs: SamImageInputs
   ): unknown;
+  addInputLabels(labels: number[][], reshapedInputPoints: unknown): unknown;
   postProcessMasks(
     predMasks: unknown,
     originalSizes: unknown,
@@ -59,9 +60,17 @@ export class SamDisposedError extends Error {
   }
 }
 
+export class SamEmptyPointsError extends Error {
+  constructor(message = "Points array must not be empty") {
+    super(message);
+    this.name = "SamEmptyPointsError";
+  }
+}
+
 export interface SamSession {
   setImage(image: SamImageInput): Promise<void>;
   segmentAtPoint(x: number, y: number): Promise<SamMaskResult>;
+  segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult>;
   dispose(): void;
 }
 
@@ -199,6 +208,63 @@ export async function createSamSession(
     return { ...binarizeMask(maskTensors[0], maskIndex), score };
   }
 
+  async function segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult> {
+    ensureNotDisposed();
+    if (points.length === 0) {
+      throw new SamEmptyPointsError();
+    }
+    if (!currentImageInputs || !currentEmbeddings || !currentImageSize) {
+      throw new SamNoImageError();
+    }
+
+    const embeddingGeneration = currentEmbeddingsGeneration;
+    if (embeddingGeneration !== generation) {
+      throw new SamStaleRequestError();
+    }
+
+    const imageInputs = currentImageInputs;
+    const embeddings = currentEmbeddings;
+    const imageSize = currentImageSize;
+
+    const rawPoints = [points.map((p) => [p.x, p.y])];
+    const rawLabels = [points.map((p) => p.label)];
+
+    const inputPoints = processor.reshapeInputPoints(rawPoints, imageSize, imageInputs);
+    const inputLabels = processor.addInputLabels(rawLabels, inputPoints);
+
+    const { predMasks, iouScores } = await model.decode({
+      ...imageInputs,
+      ...embeddings,
+      input_points: inputPoints,
+      input_labels: inputLabels,
+    });
+
+    if (disposed) {
+      throw new SamDisposedError();
+    }
+    if (embeddingGeneration !== generation) {
+      throw new SamStaleRequestError();
+    }
+
+    const maskTensors = await processor.postProcessMasks(
+      predMasks,
+      imageInputs.originalSizes,
+      imageInputs.reshapedInputSizes
+    );
+
+    if (disposed) {
+      throw new SamDisposedError();
+    }
+    if (embeddingGeneration !== generation) {
+      throw new SamStaleRequestError();
+    }
+
+    const maskIndex = pickBestMaskIndex(iouScores);
+    const score = iouScores[0]?.[0]?.[maskIndex] ?? 0;
+
+    return { ...binarizeMask(maskTensors[0], maskIndex), score };
+  }
+
   function dispose(): void {
     disposed = true;
     currentImageInputs = null;
@@ -206,5 +272,5 @@ export async function createSamSession(
     currentImageSize = null;
   }
 
-  return { setImage, segmentAtPoint, dispose };
+  return { setImage, segmentAtPoint, segmentAtPoints, dispose };
 }
