@@ -56,6 +56,7 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
   const statusRef = useRef<SegmentationStatus>("idle");
   const imageRef = useRef<LoadedImage | null>(null);
   const pointsRef = useRef<SegmentPoint[]>([]);
+  const layerCounterRef = useRef<number>(0);
 
   useEffect(() => {
     return () => {
@@ -86,6 +87,7 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     if (!mask) {
       return;
     }
+    layerCounterRef.current++;
     setLayers((prev) => [
       ...prev,
       {
@@ -93,7 +95,7 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
           typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
             ? crypto.randomUUID()
             : `layer-${Date.now()}-${Math.random()}`,
-        label: `レイヤー${prev.length + 1}`,
+        label: `レイヤー${layerCounterRef.current}`,
         mask,
       },
     ]);
@@ -113,6 +115,7 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     }
     imageRef.current = null;
     pointsRef.current = [];
+    layerCounterRef.current = 0;
     statusRef.current = "idle";
     setImageState(null);
     setMask(null);

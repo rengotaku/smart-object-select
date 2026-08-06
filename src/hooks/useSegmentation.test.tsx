@@ -580,4 +580,74 @@ describe("useSegmentation", () => {
 
     expect(result.current.layers).toHaveLength(1);
   });
+
+  it("Case 16-17: レイヤー1・2を保存→レイヤー1を削除→新規保存で「レイヤー3」になる（重複しない）", async () => {
+    const mask1: SamMaskResult = {
+      data: new Uint8Array([1]),
+      width: 1,
+      height: 1,
+      score: 0.8,
+    };
+    const mask2: SamMaskResult = {
+      data: new Uint8Array([2]),
+      width: 1,
+      height: 1,
+      score: 0.9,
+    };
+    const mask3: SamMaskResult = {
+      data: new Uint8Array([3]),
+      width: 1,
+      height: 1,
+      score: 0.95,
+    };
+    const segmentAtPointsMock = vi
+      .fn()
+      .mockResolvedValueOnce(mask1)
+      .mockResolvedValueOnce(mask2)
+      .mockResolvedValueOnce(mask3);
+
+    const client = createFakeClient({
+      segmentAtPoints: segmentAtPointsMock,
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    await act(async () => {
+      await result.current.addPoint(30, 40, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.layers).toHaveLength(2);
+    expect(result.current.layers[0].label).toBe("レイヤー1");
+    expect(result.current.layers[1].label).toBe("レイヤー2");
+
+    act(() => {
+      result.current.removeLayer(result.current.layers[0].id);
+    });
+
+    expect(result.current.layers).toHaveLength(1);
+    expect(result.current.layers[0].label).toBe("レイヤー2");
+
+    await act(async () => {
+      await result.current.addPoint(50, 60, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.layers).toHaveLength(2);
+    expect(result.current.layers.map((l) => l.label)).toEqual(["レイヤー2", "レイヤー3"]);
+  });
 });

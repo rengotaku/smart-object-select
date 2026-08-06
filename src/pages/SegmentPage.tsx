@@ -133,7 +133,7 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
                   <Button
                     variant="outline"
                     size="sm"
-                    disabled={!mask}
+                    disabled={!mask || segStatus !== "ready"}
                     onClick={saveLayer}
                   >
                     <Layers className="mr-2 size-4" />
