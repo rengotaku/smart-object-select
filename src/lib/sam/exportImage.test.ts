@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { applyMaskToImage, maskToBlackAndWhite } from "./exportImage";
+import {
+  applyMaskToImage,
+  computeMaskBounds,
+  cropRgbaPixels,
+  maskToBlackAndWhite,
+  type RgbaPixels,
+} from "./exportImage";
 import type { SamImageInput, SamMaskResult } from "./types";
 
 describe("exportImage", () => {
@@ -121,6 +127,98 @@ describe("exportImage", () => {
       expect(result.width).toBe(3);
       expect(result.height).toBe(5);
       expect(result.data.length).toBe(60);
+    });
+  });
+
+  describe("computeMaskBounds", () => {
+    it("Case 16-12: computeMaskBounds は不透明領域のタイトなバウンディングボックスを返す", () => {
+      // 4x4 マスク、 (1,1)〜(2,2) の2x2だけ値1
+      const maskData = new Uint8Array(4 * 4);
+      // y=1: x=1, x=2
+      maskData[1 * 4 + 1] = 1;
+      maskData[1 * 4 + 2] = 1;
+      // y=2: x=1, x=2
+      maskData[2 * 4 + 1] = 1;
+      maskData[2 * 4 + 2] = 1;
+
+      const mask: SamMaskResult = {
+        data: maskData,
+        width: 4,
+        height: 4,
+        score: 0.9,
+      };
+
+      const result = computeMaskBounds(mask);
+      expect(result).toEqual({ x: 1, y: 1, width: 2, height: 2 });
+    });
+
+    it("Case 16-13: computeMaskBounds は全て0のマスクで null を返す", () => {
+      const mask: SamMaskResult = {
+        data: new Uint8Array(4 * 4),
+        width: 4,
+        height: 4,
+        score: 0.9,
+      };
+
+      const result = computeMaskBounds(mask);
+      expect(result).toBeNull();
+    });
+
+    it("Case 16-14: computeMaskBounds は単一ピクセルのマスクで width=1,height=1 を返す", () => {
+      const maskData = new Uint8Array(4 * 4);
+      maskData[2 * 4 + 3] = 1; // x=3, y=2
+
+      const mask: SamMaskResult = {
+        data: maskData,
+        width: 4,
+        height: 4,
+        score: 0.9,
+      };
+
+      const result = computeMaskBounds(mask);
+      expect(result).toEqual({ x: 3, y: 2, width: 1, height: 1 });
+    });
+  });
+
+  describe("cropRgbaPixels", () => {
+    it("Case 16-15: cropRgbaPixels は指定した矩形だけを正しい順序で切り出す", () => {
+      const width = 4;
+      const height = 4;
+      const data = new Uint8ClampedArray(width * height * 4);
+
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const idx = (y * width + x) * 4;
+          data[idx] = x;
+          data[idx + 1] = y;
+          data[idx + 2] = 100;
+          data[idx + 3] = 255;
+        }
+      }
+
+      const pixels: RgbaPixels = { data, width, height };
+
+      const cropped = cropRgbaPixels(pixels, { x: 1, y: 1, width: 2, height: 2 });
+
+      expect(cropped.width).toBe(2);
+      expect(cropped.height).toBe(2);
+      expect(cropped.data.length).toBe(2 * 2 * 4);
+
+      // (x=1, y=1)
+      expect(cropped.data[0]).toBe(1);
+      expect(cropped.data[1]).toBe(1);
+
+      // (x=2, y=1)
+      expect(cropped.data[4]).toBe(2);
+      expect(cropped.data[5]).toBe(1);
+
+      // (x=1, y=2)
+      expect(cropped.data[8]).toBe(1);
+      expect(cropped.data[9]).toBe(2);
+
+      // (x=2, y=2)
+      expect(cropped.data[12]).toBe(2);
+      expect(cropped.data[13]).toBe(2);
     });
   });
 });

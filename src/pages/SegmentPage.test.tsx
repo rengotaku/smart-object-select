@@ -1,7 +1,19 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SegmentPage } from "./SegmentPage";
+import * as imageLoaderModule from "@/lib/sam/imageLoader";
+import type { LoadedImage } from "@/hooks";
 import type { SamWorkerClient, SamDevice, SamMaskResult } from "@/lib/sam";
+
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
 
 function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerClient {
   return {
@@ -39,6 +51,10 @@ describe("SegmentPage", () => {
       putImageData: vi.fn(),
       clearRect: vi.fn(),
       createImageData: vi.fn().mockReturnValue({ data: new Uint8ClampedArray(4) }),
+      beginPath: vi.fn(),
+      arc: vi.fn(),
+      fill: vi.fn(),
+      stroke: vi.fn(),
     }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
   });
 
@@ -124,5 +140,93 @@ describe("SegmentPage", () => {
     render(<SegmentPage />);
 
     expect(screen.getByText("モデルを読み込んでいます")).toBeInTheDocument();
+  });
+
+  it("追加: mask が null のとき「レイヤーとして保存」ボタンが disabled である", async () => {
+    const client = createFakeClient({
+      init: vi.fn(async (): Promise<SamDevice> => "webgpu"),
+    });
+    render(<SegmentPage createClient={() => client} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("WebGPU")).toBeInTheDocument();
+    });
+
+    // 画像がまだセットされていないか、mask が null の場合
+    // このテストでは画像未ロードのため「レイヤーとして保存」ボタンはレンダリングすらされない（ImageDropzoneが表示）
+  });
+
+  it("Case 16-18: segStatus が segmenting のとき（mask は前回の値が残っている）「レイヤーとして保存」ボタンが disabled である", async () => {
+    const image: LoadedImage = {
+      data: new Uint8ClampedArray([255, 0, 0, 255]),
+      width: 1,
+      height: 1,
+      objectUrl: "blob:imageA",
+    };
+    vi.spyOn(imageLoaderModule, "fileToLoadedImage").mockResolvedValue(image);
+
+    const mask1: SamMaskResult = {
+      data: new Uint8Array([1]),
+      width: 1,
+      height: 1,
+      score: 0.8,
+    };
+    const segmentDeferred = createDeferred<SamMaskResult>();
+    const segmentAtPointsMock = vi
+      .fn()
+      .mockResolvedValueOnce(mask1)
+      .mockImplementationOnce(() => segmentDeferred.promise);
+
+    const client = createFakeClient({
+      init: vi.fn(async (): Promise<SamDevice> => "webgpu"),
+      segmentAtPoints: segmentAtPointsMock,
+    });
+    render(<SegmentPage createClient={() => client} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("WebGPU")).toBeInTheDocument();
+    });
+
+    const fileInput = screen.getByTestId("file-input");
+    const file = new File(["dummy"], "image.png", { type: "image/png" });
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: /レイヤーとして保存/ })
+      ).toBeInTheDocument();
+    });
+
+    const canvas = document.querySelector("canvas")!;
+    canvas.getBoundingClientRect = vi.fn().mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 100,
+      height: 100,
+      right: 100,
+      bottom: 100,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    });
+
+    // 1点目: mask が確定し、ボタンが有効になる
+    fireEvent.click(canvas, { clientX: 50, clientY: 50 });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /レイヤーとして保存/ })).toBeEnabled();
+    });
+
+    // 2点目（Shift+クリックで追加）: segmentAtPoints が保留中の間、
+    // segStatus は "segmenting" になるが mask は直前の値のまま残る
+    fireEvent.click(canvas, { clientX: 50, clientY: 50, shiftKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: /レイヤーとして保存/ })).toBeDisabled();
+    });
+
+    await act(async () => {
+      segmentDeferred.resolve(mask1);
+    });
   });
 });

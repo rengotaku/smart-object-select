@@ -56,3 +56,68 @@ export function maskToBlackAndWhite(mask: SamMaskResult): RgbaPixels {
 
   return { data, width: mask.width, height: mask.height };
 }
+
+/**
+ * マスクの不透明領域 (data > 0) の最小・最大座標からタイトなバウンディングボックスを計算する。
+ * マスクが全て 0 の場合は null を返す。
+ */
+export function computeMaskBounds(
+  mask: SamMaskResult
+): { x: number; y: number; width: number; height: number } | null {
+  let minX = mask.width;
+  let minY = mask.height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < mask.height; y++) {
+    for (let x = 0; x < mask.width; x++) {
+      if (mask.data[y * mask.width + x] > 0) {
+        if (x < minX) minX = x;
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+      }
+    }
+  }
+
+  if (maxX === -1 || maxY === -1) {
+    return null;
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
+}
+
+/**
+ * RgbaPixels から指定した bounds の矩形領域を切り出した新しい RgbaPixels を返す。
+ */
+export function cropRgbaPixels(
+  pixels: RgbaPixels,
+  bounds: { x: number; y: number; width: number; height: number }
+): RgbaPixels {
+  const croppedData = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+
+  for (let y = 0; y < bounds.height; y++) {
+    const srcY = bounds.y + y;
+    for (let x = 0; x < bounds.width; x++) {
+      const srcX = bounds.x + x;
+      const srcOffset = (srcY * pixels.width + srcX) * 4;
+      const destOffset = (y * bounds.width + x) * 4;
+
+      croppedData[destOffset] = pixels.data[srcOffset];
+      croppedData[destOffset + 1] = pixels.data[srcOffset + 1];
+      croppedData[destOffset + 2] = pixels.data[srcOffset + 2];
+      croppedData[destOffset + 3] = pixels.data[srcOffset + 3];
+    }
+  }
+
+  return {
+    data: croppedData,
+    width: bounds.width,
+    height: bounds.height,
+  };
+}
