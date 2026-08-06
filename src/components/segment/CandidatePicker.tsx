@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   composeMaskOverlayInBounds,
   computeThumbnailOutputSize,
@@ -122,11 +122,21 @@ export function CandidatePicker({
   selectedIndex,
   onSelect,
 }: CandidatePickerProps) {
+  // computeCropBounds は候補全件の全画素を走査するため、selectedIndex の
+  // 変化（候補の切り替え）だけでは再計算しない。image/candidates（＝新しい
+  // セグメンテーション結果）が変わったときだけ再計算する。メモ化していないと
+  // 候補切り替えのたびに全 CandidateItem の描画 useEffect が
+  // （cropBounds の参照が変わることで）不要に再実行されてしまう。
+  const cropBounds = useMemo(() => {
+    if (!image) {
+      return { x: 0, y: 0, width: 0, height: 0 };
+    }
+    return computeCropBounds(image, candidates);
+  }, [image, candidates]);
+
   if (!image || candidates.length <= 1) {
     return null;
   }
-
-  const cropBounds = computeCropBounds(image, candidates);
 
   return (
     <div className="space-y-3 rounded-lg border bg-card p-4 text-card-foreground shadow-sm">
