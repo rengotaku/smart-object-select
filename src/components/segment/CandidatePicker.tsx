@@ -1,10 +1,6 @@
 import { useEffect, useRef } from "react";
-import {
-  computeUnionBounds,
-  cropRgbaPixels,
-  type RgbaPixels,
-} from "@/lib/sam/exportImage";
-import { maskToOverlayPixels } from "@/lib/sam/maskOverlay";
+import { composeMaskOverlayInBounds, computeUnionBounds } from "@/lib/sam/exportImage";
+import type { OverlayColor } from "@/lib/sam/maskOverlay";
 import { cn } from "@/lib/utils";
 import type { SamImageInput, SamMaskResult } from "@/lib/sam";
 
@@ -22,44 +18,7 @@ interface CropBounds {
   height: number;
 }
 
-const OVERLAY_COLOR = { r: 59, g: 130, b: 246, a: 160 };
-
-/** 元画像にマスクのオーバーレイ色を合成した RGBA を返す（image と candidate の寸法が一致しない場合は throw） */
-function composeMaskOverlay(image: SamImageInput, mask: SamMaskResult): RgbaPixels {
-  if (image.width !== mask.width || image.height !== mask.height) {
-    throw new Error(
-      `Image and mask dimensions do not match: image=${image.width}x${image.height}, mask=${mask.width}x${mask.height}`
-    );
-  }
-
-  const overlay = maskToOverlayPixels(mask, OVERLAY_COLOR);
-  const pixelCount = image.width * image.height;
-  const data = new Uint8ClampedArray(pixelCount * 4);
-
-  for (let i = 0; i < pixelCount; i++) {
-    const offset = i * 4;
-    const overlayAlpha = overlay.data[offset + 3] / 255;
-
-    if (overlayAlpha > 0) {
-      data[offset] =
-        overlay.data[offset] * overlayAlpha + image.data[offset] * (1 - overlayAlpha);
-      data[offset + 1] =
-        overlay.data[offset + 1] * overlayAlpha +
-        image.data[offset + 1] * (1 - overlayAlpha);
-      data[offset + 2] =
-        overlay.data[offset + 2] * overlayAlpha +
-        image.data[offset + 2] * (1 - overlayAlpha);
-      data[offset + 3] = 255;
-    } else {
-      data[offset] = image.data[offset];
-      data[offset + 1] = image.data[offset + 1];
-      data[offset + 2] = image.data[offset + 2];
-      data[offset + 3] = image.data[offset + 3];
-    }
-  }
-
-  return { data, width: image.width, height: image.height };
-}
+const OVERLAY_COLOR: OverlayColor = { r: 59, g: 130, b: 246, a: 160 };
 
 function computeCropBounds(
   image: SamImageInput,
@@ -113,14 +72,18 @@ function CandidateItem({
     if (!ctx) return;
 
     try {
-      const composed = composeMaskOverlay(image, candidate);
-      const cropped = cropRgbaPixels(composed, cropBounds);
+      const composed = composeMaskOverlayInBounds(
+        image,
+        candidate,
+        cropBounds,
+        OVERLAY_COLOR
+      );
 
-      canvas.width = cropped.width;
-      canvas.height = cropped.height;
-      ctx.clearRect(0, 0, cropped.width, cropped.height);
-      const imgData = ctx.createImageData(cropped.width, cropped.height);
-      imgData.data.set(cropped.data);
+      canvas.width = composed.width;
+      canvas.height = composed.height;
+      ctx.clearRect(0, 0, composed.width, composed.height);
+      const imgData = ctx.createImageData(composed.width, composed.height);
+      imgData.data.set(composed.data);
       ctx.putImageData(imgData, 0, 0);
     } catch {
       // 寸法不一致等のエラー時は描画をスキップ

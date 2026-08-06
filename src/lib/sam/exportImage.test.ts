@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyMaskToImage,
+  composeMaskOverlayInBounds,
   computeMaskBounds,
   computeUnionBounds,
   cropRgbaPixels,
@@ -260,6 +261,79 @@ describe("exportImage", () => {
       // (x=2, y=2)
       expect(cropped.data[12]).toBe(2);
       expect(cropped.data[13]).toBe(2);
+    });
+  });
+
+  describe("composeMaskOverlayInBounds", () => {
+    // 10x10 の画像。各ピクセルの R チャンネルにグローバル index を埋め込み、
+    // bounds 外を読んでいないかを「読んだ値がその座標に対応しているか」で検証する。
+    function makeIndexedImage(): SamImageInput {
+      const data = new Uint8ClampedArray(10 * 10 * 4);
+      for (let i = 0; i < 100; i++) {
+        const offset = i * 4;
+        data[offset] = i; // R = グローバル pixel index
+        data[offset + 1] = 0;
+        data[offset + 2] = 0;
+        data[offset + 3] = 255;
+      }
+      return { data, width: 10, height: 10 };
+    }
+
+    it("Case 19-13: bounds 内の画素だけを正しく合成する（bounds 外を読み書きしない）", () => {
+      const image = makeIndexedImage();
+      // bounds = x:3, y:2, width:3, height:3 → グローバル index 23,24,25 / 33,34,35 / 43,44,45
+      const bounds = { x: 3, y: 2, width: 3, height: 3 };
+      const maskData = new Uint8Array(10 * 10);
+      maskData[34] = 1; // bounds のローカル座標 (1,1) だけをマスク対象にする
+      const mask: SamMaskResult = { data: maskData, width: 10, height: 10, score: 1 };
+      const color = { r: 0, g: 255, b: 0, a: 255 };
+
+      const result = composeMaskOverlayInBounds(image, mask, bounds, color);
+
+      // 出力サイズは bounds と一致（画像全体サイズのバッファを確保していない）
+      expect(result.width).toBe(3);
+      expect(result.height).toBe(3);
+      expect(result.data.length).toBe(3 * 3 * 4);
+
+      const globalIndices = [23, 24, 25, 33, 34, 35, 43, 44, 45];
+      for (let localY = 0; localY < 3; localY++) {
+        for (let localX = 0; localX < 3; localX++) {
+          const destOffset = (localY * 3 + localX) * 4;
+          const isMaskedCenter = localX === 1 && localY === 1;
+          if (isMaskedCenter) {
+            // マスク内: color (a=255 → フル不透明) とブレンドされる
+            expect(result.data[destOffset]).toBe(0);
+            expect(result.data[destOffset + 1]).toBe(255);
+            expect(result.data[destOffset + 2]).toBe(0);
+            expect(result.data[destOffset + 3]).toBe(255);
+          } else {
+            // マスク外: 元画像のその座標のピクセルがそのままコピーされる
+            const globalIndex = globalIndices[localY * 3 + localX];
+            expect(result.data[destOffset]).toBe(globalIndex);
+            expect(result.data[destOffset + 1]).toBe(0);
+            expect(result.data[destOffset + 2]).toBe(0);
+            expect(result.data[destOffset + 3]).toBe(255);
+          }
+        }
+      }
+    });
+
+    it("Case 19-13b: image と mask の寸法が一致しない場合は throw する", () => {
+      const image = makeIndexedImage();
+      const mismatchedMask: SamMaskResult = {
+        data: new Uint8Array(5 * 5),
+        width: 5,
+        height: 5,
+        score: 1,
+      };
+      expect(() =>
+        composeMaskOverlayInBounds(
+          image,
+          mismatchedMask,
+          { x: 0, y: 0, width: 3, height: 3 },
+          { r: 0, g: 255, b: 0, a: 255 }
+        )
+      ).toThrow();
     });
   });
 });

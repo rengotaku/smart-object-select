@@ -1,4 +1,5 @@
 import type { SamImageInput, SamMaskResult } from "./types";
+import type { OverlayColor } from "./maskOverlay";
 
 /** RGBA ピクセル列。data.length === width * height * 4 */
 export interface RgbaPixels {
@@ -124,6 +125,53 @@ export function computeUnionBounds(
     width: maxX - minX,
     height: maxY - minY,
   };
+}
+
+/**
+ * 元画像の bounds 内だけを対象に、マスクのオーバーレイ色をアルファブレンドした RGBA を返す。
+ * image と mask の寸法が一致しない場合は Error を throw する。
+ *
+ * 画像全体サイズの一時バッファは確保せず、計算量は bounds の面積（width * height）に比例する
+ * （高解像度画像で候補ごとにフルサイズの一時アロケーションが発生するのを避けるための実装）。
+ */
+export function composeMaskOverlayInBounds(
+  image: SamImageInput,
+  mask: SamMaskResult,
+  bounds: { x: number; y: number; width: number; height: number },
+  color: OverlayColor
+): RgbaPixels {
+  if (image.width !== mask.width || image.height !== mask.height) {
+    throw new Error(
+      `Image and mask dimensions do not match: image=${image.width}x${image.height}, mask=${mask.width}x${mask.height}`
+    );
+  }
+
+  const data = new Uint8ClampedArray(bounds.width * bounds.height * 4);
+  const alpha = color.a / 255;
+
+  for (let y = 0; y < bounds.height; y++) {
+    const srcY = bounds.y + y;
+    for (let x = 0; x < bounds.width; x++) {
+      const srcX = bounds.x + x;
+      const srcIndex = srcY * image.width + srcX;
+      const srcOffset = srcIndex * 4;
+      const destOffset = (y * bounds.width + x) * 4;
+
+      if (mask.data[srcIndex] > 0) {
+        data[destOffset] = color.r * alpha + image.data[srcOffset] * (1 - alpha);
+        data[destOffset + 1] = color.g * alpha + image.data[srcOffset + 1] * (1 - alpha);
+        data[destOffset + 2] = color.b * alpha + image.data[srcOffset + 2] * (1 - alpha);
+        data[destOffset + 3] = 255;
+      } else {
+        data[destOffset] = image.data[srcOffset];
+        data[destOffset + 1] = image.data[srcOffset + 1];
+        data[destOffset + 2] = image.data[srcOffset + 2];
+        data[destOffset + 3] = image.data[srcOffset + 3];
+      }
+    }
+  }
+
+  return { data, width: bounds.width, height: bounds.height };
 }
 
 /**
