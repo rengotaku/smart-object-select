@@ -1,6 +1,14 @@
-import { AlertTriangle, Cpu, Loader2, RefreshCw, RotateCcw, Zap } from "lucide-react";
+import {
+  AlertTriangle,
+  Cpu,
+  Layers,
+  Loader2,
+  RefreshCw,
+  RotateCcw,
+  Zap,
+} from "lucide-react";
 
-import { ExportBar, ImageDropzone, SegmentCanvas } from "@/components";
+import { ExportBar, ImageDropzone, LayerPanel, SegmentCanvas } from "@/components";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -28,10 +36,13 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
     image,
     mask,
     points,
+    layers,
     error: segError,
     setImage,
     addPoint,
     clearPoints,
+    saveLayer,
+    removeLayer,
     reset,
   } = useSegmentation(client);
 
@@ -119,6 +130,15 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
                   クリックして対象を選択、Shift+クリックで追加、Alt+クリックで除外できます
                 </span>
                 <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!mask}
+                    onClick={saveLayer}
+                  >
+                    <Layers className="mr-2 size-4" />
+                    レイヤーとして保存
+                  </Button>
                   <Button variant="outline" size="sm" onClick={clearPoints}>
                     <RotateCcw className="mr-2 size-4" />
                     選択をやり直す
@@ -141,6 +161,13 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
               />
 
               <ExportBar image={image} mask={mask} sourceFileName={image.sourceName} />
+
+              <LayerPanel
+                image={image}
+                layers={layers}
+                onRemove={removeLayer}
+                sourceFileName={image.sourceName}
+              />
             </div>
           )}
         </>

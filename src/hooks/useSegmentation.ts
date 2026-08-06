@@ -15,6 +15,12 @@ export interface LoadedImage extends SamImageInput {
   sourceName?: string;
 }
 
+export interface SavedLayer {
+  id: string;
+  label: string;
+  mask: SamMaskResult;
+}
+
 export type SegmentationStatus = "idle" | "preparing" | "ready" | "segmenting" | "error";
 
 export interface UseSegmentationResult {
@@ -22,6 +28,7 @@ export interface UseSegmentationResult {
   image: LoadedImage | null;
   mask: SamMaskResult | null;
   points: SegmentPoint[];
+  layers: SavedLayer[];
   error: Error | null;
   setImage(image: LoadedImage): Promise<void>;
   selectAt(x: number, y: number): Promise<void>;
@@ -32,6 +39,8 @@ export interface UseSegmentationResult {
     options?: { replace?: boolean }
   ): Promise<void>;
   clearPoints(): void;
+  saveLayer(): void;
+  removeLayer(id: string): void;
   reset(): void;
 }
 
@@ -40,6 +49,7 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
   const [image, setImageState] = useState<LoadedImage | null>(null);
   const [mask, setMask] = useState<SamMaskResult | null>(null);
   const [points, setPoints] = useState<SegmentPoint[]>([]);
+  const [layers, setLayers] = useState<SavedLayer[]>([]);
   const [error, setError] = useState<Error | null>(null);
 
   const generationRef = useRef<number>(0);
@@ -72,6 +82,28 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     }
   }, []);
 
+  const saveLayer = useCallback(() => {
+    if (!mask) {
+      return;
+    }
+    setLayers((prev) => [
+      ...prev,
+      {
+        id:
+          typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+            ? crypto.randomUUID()
+            : `layer-${Date.now()}-${Math.random()}`,
+        label: `レイヤー${prev.length + 1}`,
+        mask,
+      },
+    ]);
+    clearPoints();
+  }, [mask, clearPoints]);
+
+  const removeLayer = useCallback((id: string) => {
+    setLayers((prev) => prev.filter((l) => l.id !== id));
+  }, []);
+
   const reset = useCallback(() => {
     generationRef.current++;
     if (imageRef.current?.objectUrl) {
@@ -85,6 +117,7 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     setImageState(null);
     setMask(null);
     setPoints([]);
+    setLayers([]);
     setError(null);
     setStatus("idle");
   }, []);
@@ -208,11 +241,14 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     image,
     mask,
     points,
+    layers,
     error,
     setImage,
     selectAt,
     addPoint,
     clearPoints,
+    saveLayer,
+    removeLayer,
     reset,
   };
 }

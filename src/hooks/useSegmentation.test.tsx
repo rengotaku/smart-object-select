@@ -370,4 +370,214 @@ describe("useSegmentation", () => {
     expect(result.current.status).toBe("ready");
     expect(result.current.image).toEqual(sampleImageA);
   });
+
+  it("Case 16-1: saveLayer は現在の mask を新規レイヤーとして追加する", async () => {
+    const mockMask: SamMaskResult = {
+      data: new Uint8Array([1]),
+      width: 1,
+      height: 1,
+      score: 0.8,
+    };
+    const client = createFakeClient({
+      segmentAtPoints: vi.fn(async () => mockMask),
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    const currentMask = result.current.mask;
+    expect(currentMask).toEqual(mockMask);
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.layers).toHaveLength(1);
+    expect(result.current.layers[0].mask).toEqual(currentMask);
+    expect(result.current.layers[0].label).toBe("レイヤー1");
+  });
+
+  it("Case 16-2: saveLayer 後に points/mask がクリアされる", async () => {
+    const client = createFakeClient();
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.points).toEqual([]);
+    expect(result.current.mask).toBeNull();
+  });
+
+  it("Case 16-3: mask が null のとき saveLayer を呼んでも何も起きない", async () => {
+    const client = createFakeClient();
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.layers).toEqual([]);
+    expect(result.current.points).toEqual([]);
+    expect(result.current.mask).toBeNull();
+    expect(result.current.error).toBeNull();
+  });
+
+  it("Case 16-4: 複数回 saveLayer すると連番のラベルで複数レイヤーが積まれる", async () => {
+    const mask1: SamMaskResult = {
+      data: new Uint8Array([1]),
+      width: 1,
+      height: 1,
+      score: 0.8,
+    };
+    const mask2: SamMaskResult = {
+      data: new Uint8Array([2]),
+      width: 1,
+      height: 1,
+      score: 0.9,
+    };
+    const segmentAtPointsMock = vi
+      .fn()
+      .mockResolvedValueOnce(mask1)
+      .mockResolvedValueOnce(mask2);
+
+    const client = createFakeClient({
+      segmentAtPoints: segmentAtPointsMock,
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    await act(async () => {
+      await result.current.addPoint(30, 40, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.layers).toHaveLength(2);
+    expect(result.current.layers[0].label).toBe("レイヤー1");
+    expect(result.current.layers[1].label).toBe("レイヤー2");
+    expect(result.current.layers[0].mask).toEqual(mask1);
+    expect(result.current.layers[1].mask).toEqual(mask2);
+    expect(result.current.layers[0].mask).not.toEqual(result.current.layers[1].mask);
+  });
+
+  it("Case 16-5: removeLayer は指定した id のレイヤーだけを取り除く", async () => {
+    const mask1: SamMaskResult = {
+      data: new Uint8Array([1]),
+      width: 1,
+      height: 1,
+      score: 0.8,
+    };
+    const mask2: SamMaskResult = {
+      data: new Uint8Array([2]),
+      width: 1,
+      height: 1,
+      score: 0.9,
+    };
+    const segmentAtPointsMock = vi
+      .fn()
+      .mockResolvedValueOnce(mask1)
+      .mockResolvedValueOnce(mask2);
+
+    const client = createFakeClient({
+      segmentAtPoints: segmentAtPointsMock,
+    });
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    await act(async () => {
+      await result.current.addPoint(30, 40, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    const targetId = result.current.layers[0].id;
+    const remainingLayerMask = result.current.layers[1].mask;
+
+    act(() => {
+      result.current.removeLayer(targetId);
+    });
+
+    expect(result.current.layers).toHaveLength(1);
+    expect(result.current.layers[0].mask).toEqual(remainingLayerMask);
+  });
+
+  it("Case 16-6: reset（別の画像を選ぶ）で layers もクリアされる", async () => {
+    const client = createFakeClient();
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.layers).toHaveLength(1);
+
+    act(() => {
+      result.current.reset();
+    });
+
+    expect(result.current.layers).toEqual([]);
+    expect(result.current.image).toBeNull();
+    expect(result.current.mask).toBeNull();
+    expect(result.current.points).toEqual([]);
+  });
+
+  it("Case 16-10: 存在しない id で removeLayer を呼んでも layers に変化がない", async () => {
+    const client = createFakeClient();
+    const { result } = renderHook(() => useSegmentation(client));
+
+    await act(async () => {
+      await result.current.setImage(sampleImageA);
+      await result.current.addPoint(10, 20, 1);
+    });
+
+    act(() => {
+      result.current.saveLayer();
+    });
+
+    expect(result.current.layers).toHaveLength(1);
+
+    act(() => {
+      result.current.removeLayer("non-existent-id");
+    });
+
+    expect(result.current.layers).toHaveLength(1);
+  });
 });

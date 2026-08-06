@@ -17,4 +17,5 @@ export {
   type LoadedImage,
   type SegmentationStatus,
   type UseSegmentationResult,
+  type SavedLayer,
 } from "./useSegmentation";

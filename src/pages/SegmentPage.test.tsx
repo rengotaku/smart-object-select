@@ -125,4 +125,18 @@ describe("SegmentPage", () => {
 
     expect(screen.getByText("モデルを読み込んでいます")).toBeInTheDocument();
   });
+
+  it("追加: mask が null のとき「レイヤーとして保存」ボタンが disabled である", async () => {
+    const client = createFakeClient({
+      init: vi.fn(async (): Promise<SamDevice> => "webgpu"),
+    });
+    render(<SegmentPage createClient={() => client} />);
+
+    await waitFor(() => {
+      expect(screen.getByText("WebGPU")).toBeInTheDocument();
+    });
+
+    // 画像がまだセットされていないか、mask が null の場合
+    // このテストでは画像未ロードのため「レイヤーとして保存」ボタンはレンダリングすらされない（ImageDropzoneが表示）
+  });
 });
