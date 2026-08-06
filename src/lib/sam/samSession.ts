@@ -69,8 +69,8 @@ export class SamEmptyPointsError extends Error {
 
 export interface SamSession {
   setImage(image: SamImageInput): Promise<void>;
-  segmentAtPoint(x: number, y: number): Promise<SamMaskResult>;
-  segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult>;
+  segmentAtPoint(x: number, y: number): Promise<SamMaskResult[]>;
+  segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult[]>;
   dispose(): void;
 }
 
@@ -106,6 +106,25 @@ export function binarizeMask(tensor: MaskTensorLike, maskIndex: number): SamMask
   }
 
   return { data, width, height, score: 0 };
+}
+
+/**
+ * dims=[1, numMasks, height, width] のマスクテンソルから numMasks 件すべてのマスクを
+ * 切り出し、対応する iouScores を付与して score 降順にソートして返す。
+ */
+export function binarizeAllMasks(
+  tensor: MaskTensorLike,
+  iouScores: number[][][]
+): SamMaskResult[] {
+  const [, numMasks] = tensor.dims;
+
+  const results: SamMaskResult[] = [];
+  for (let index = 0; index < numMasks; index += 1) {
+    const score = iouScores[0]?.[0]?.[index] ?? 0;
+    results.push({ ...binarizeMask(tensor, index), score });
+  }
+
+  return results.sort((a, b) => b.score - a.score);
 }
 
 export async function createSamSession(
@@ -154,7 +173,7 @@ export async function createSamSession(
     currentEmbeddingsGeneration = requestGeneration;
   }
 
-  async function segmentAtPoint(x: number, y: number): Promise<SamMaskResult> {
+  async function segmentAtPoint(x: number, y: number): Promise<SamMaskResult[]> {
     ensureNotDisposed();
     if (!currentImageInputs || !currentEmbeddings || !currentImageSize) {
       throw new SamNoImageError();
@@ -202,13 +221,10 @@ export async function createSamSession(
       throw new SamStaleRequestError();
     }
 
-    const maskIndex = pickBestMaskIndex(iouScores);
-    const score = iouScores[0]?.[0]?.[maskIndex] ?? 0;
-
-    return { ...binarizeMask(maskTensors[0], maskIndex), score };
+    return binarizeAllMasks(maskTensors[0], iouScores);
   }
 
-  async function segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult> {
+  async function segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult[]> {
     ensureNotDisposed();
     if (points.length === 0) {
       throw new SamEmptyPointsError();
@@ -259,10 +275,7 @@ export async function createSamSession(
       throw new SamStaleRequestError();
     }
 
-    const maskIndex = pickBestMaskIndex(iouScores);
-    const score = iouScores[0]?.[0]?.[maskIndex] ?? 0;
-
-    return { ...binarizeMask(maskTensors[0], maskIndex), score };
+    return binarizeAllMasks(maskTensors[0], iouScores);
   }
 
   function dispose(): void {

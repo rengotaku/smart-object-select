@@ -34,13 +34,13 @@ export function createSamWorkerHandler(runtime: SamRuntime): SamWorkerHandler {
         }
         case "segment": {
           const session = await requireSession();
-          const mask = await session.segmentAtPoint(request.x, request.y);
-          return { id: request.id, type: "result", payload: mask };
+          const masks = await session.segmentAtPoint(request.x, request.y);
+          return { id: request.id, type: "result", payload: masks };
         }
         case "segmentAtPoints": {
           const session = await requireSession();
-          const mask = await session.segmentAtPoints(request.points);
-          return { id: request.id, type: "result", payload: mask };
+          const masks = await session.segmentAtPoints(request.points);
+          return { id: request.id, type: "result", payload: masks };
         }
       }
     } catch (error) {

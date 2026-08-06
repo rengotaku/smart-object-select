@@ -1,4 +1,5 @@
 import type { SamImageInput, SamMaskResult } from "./types";
+import type { OverlayColor } from "./maskOverlay";
 
 /** RGBA ピクセル列。data.length === width * height * 4 */
 export interface RgbaPixels {
@@ -90,6 +91,117 @@ export function computeMaskBounds(
     width: maxX - minX + 1,
     height: maxY - minY + 1,
   };
+}
+
+/**
+ * 複数マスクそれぞれの `computeMaskBounds` の和集合となるバウンディングボックスを計算する。
+ * masks が空、または全マスクが空（bounds が全て null）の場合は null を返す。
+ */
+export function computeUnionBounds(
+  masks: SamMaskResult[]
+): { x: number; y: number; width: number; height: number } | null {
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+
+  for (const mask of masks) {
+    const bounds = computeMaskBounds(mask);
+    if (!bounds) continue;
+
+    if (bounds.x < minX) minX = bounds.x;
+    if (bounds.y < minY) minY = bounds.y;
+    if (bounds.x + bounds.width > maxX) maxX = bounds.x + bounds.width;
+    if (bounds.y + bounds.height > maxY) maxY = bounds.y + bounds.height;
+  }
+
+  if (maxX === -Infinity || maxY === -Infinity) {
+    return null;
+  }
+
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+/** サムネイル合成の出力解像度の上限（px）。表示は CSS で縮小されるだけなので、
+ * 合成計算自体をこのサイズに収めることで crop 領域や元画像の解像度に依存しない計算量にする。 */
+export const THUMBNAIL_MAX_SIZE = 160;
+
+/**
+ * bounds のアスペクト比を保ったまま、幅・高さともに maxSize 以下に収まる出力サイズを計算する。
+ * bounds が既に maxSize 以下ならそのままのサイズを返す。
+ */
+export function computeThumbnailOutputSize(
+  bounds: { width: number; height: number },
+  maxSize: number = THUMBNAIL_MAX_SIZE
+): { width: number; height: number } {
+  const { width, height } = bounds;
+  if (width <= maxSize && height <= maxSize) {
+    return { width, height };
+  }
+
+  const scale = Math.min(maxSize / width, maxSize / height);
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+  };
+}
+
+/**
+ * 元画像の bounds 内だけを対象に、マスクのオーバーレイ色をアルファブレンドした RGBA を返す。
+ * image と mask の寸法が一致しない場合は Error を throw する。
+ *
+ * 画像全体サイズの一時バッファは確保せず、計算量は出力サイズ（outputSize。省略時は bounds と同じ）
+ * の面積（width * height）に比例する。outputSize を bounds より小さく指定すると、出力グリッド側から
+ * nearest-neighbor でサンプリングするため、bounds の面積や元画像の解像度に関わらず計算量を一定に抑えられる
+ * （高解像度画像で候補ごとにフルサイズ・crop 原寸の一時アロケーションが発生するのを避けるための実装）。
+ */
+export function composeMaskOverlayInBounds(
+  image: SamImageInput,
+  mask: SamMaskResult,
+  bounds: { x: number; y: number; width: number; height: number },
+  color: OverlayColor,
+  outputSize?: { width: number; height: number }
+): RgbaPixels {
+  if (image.width !== mask.width || image.height !== mask.height) {
+    throw new Error(
+      `Image and mask dimensions do not match: image=${image.width}x${image.height}, mask=${mask.width}x${mask.height}`
+    );
+  }
+
+  const outWidth = outputSize?.width ?? bounds.width;
+  const outHeight = outputSize?.height ?? bounds.height;
+
+  const data = new Uint8ClampedArray(outWidth * outHeight * 4);
+  const alpha = color.a / 255;
+
+  for (let outY = 0; outY < outHeight; outY++) {
+    const srcY = bounds.y + Math.floor((outY * bounds.height) / outHeight);
+    for (let outX = 0; outX < outWidth; outX++) {
+      const srcX = bounds.x + Math.floor((outX * bounds.width) / outWidth);
+      const srcIndex = srcY * image.width + srcX;
+      const srcOffset = srcIndex * 4;
+      const destOffset = (outY * outWidth + outX) * 4;
+
+      if (mask.data[srcIndex] > 0) {
+        data[destOffset] = color.r * alpha + image.data[srcOffset] * (1 - alpha);
+        data[destOffset + 1] = color.g * alpha + image.data[srcOffset + 1] * (1 - alpha);
+        data[destOffset + 2] = color.b * alpha + image.data[srcOffset + 2] * (1 - alpha);
+        data[destOffset + 3] = 255;
+      } else {
+        data[destOffset] = image.data[srcOffset];
+        data[destOffset + 1] = image.data[srcOffset + 1];
+        data[destOffset + 2] = image.data[srcOffset + 2];
+        data[destOffset + 3] = image.data[srcOffset + 3];
+      }
+    }
+  }
+
+  return { data, width: outWidth, height: outHeight };
 }
 
 /**

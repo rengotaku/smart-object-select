@@ -8,20 +8,24 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
     init: vi.fn(async (): Promise<SamDevice> => "wasm"),
     setImage: vi.fn(async (): Promise<void> => undefined),
     segment: vi.fn(
-      async (): Promise<SamMaskResult> => ({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 1,
-      })
+      async (): Promise<SamMaskResult[]> => [
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 1,
+        },
+      ]
     ),
     segmentAtPoints: vi.fn(
-      async (): Promise<SamMaskResult> => ({
-        data: new Uint8Array([1]),
-        width: 1,
-        height: 1,
-        score: 1,
-      })
+      async (): Promise<SamMaskResult[]> => [
+        {
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 1,
+        },
+      ]
     ),
     terminate: vi.fn(),
     ...overrides,

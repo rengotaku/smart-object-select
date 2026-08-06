@@ -27,6 +27,8 @@ export interface UseSegmentationResult {
   status: SegmentationStatus;
   image: LoadedImage | null;
   mask: SamMaskResult | null;
+  candidates: SamMaskResult[];
+  selectedCandidateIndex: number;
   points: SegmentPoint[];
   layers: SavedLayer[];
   error: Error | null;
@@ -42,15 +44,19 @@ export interface UseSegmentationResult {
   saveLayer(): void;
   removeLayer(id: string): void;
   reset(): void;
+  selectCandidate(index: number): void;
 }
 
 export function useSegmentation(client: SamWorkerClient | null): UseSegmentationResult {
   const [status, setStatus] = useState<SegmentationStatus>("idle");
   const [image, setImageState] = useState<LoadedImage | null>(null);
-  const [mask, setMask] = useState<SamMaskResult | null>(null);
+  const [candidates, setCandidates] = useState<SamMaskResult[]>([]);
+  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState<number>(0);
   const [points, setPoints] = useState<SegmentPoint[]>([]);
   const [layers, setLayers] = useState<SavedLayer[]>([]);
   const [error, setError] = useState<Error | null>(null);
+
+  const mask = candidates[selectedCandidateIndex] ?? null;
 
   const generationRef = useRef<number>(0);
   const statusRef = useRef<SegmentationStatus>("idle");
@@ -75,7 +81,8 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     generationRef.current++;
     pointsRef.current = [];
     setPoints([]);
-    setMask(null);
+    setCandidates([]);
+    setSelectedCandidateIndex(0);
     setError(null);
     if (imageRef.current) {
       statusRef.current = "ready";
@@ -118,7 +125,8 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     layerCounterRef.current = 0;
     statusRef.current = "idle";
     setImageState(null);
-    setMask(null);
+    setCandidates([]);
+    setSelectedCandidateIndex(0);
     setPoints([]);
     setLayers([]);
     setError(null);
@@ -142,7 +150,8 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
       setImageState(newImage);
       pointsRef.current = [];
       setPoints([]);
-      setMask(null);
+      setCandidates([]);
+      setSelectedCandidateIndex(0);
       setError(null);
       statusRef.current = "preparing";
       setStatus("preparing");
@@ -202,10 +211,11 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
       setStatus("segmenting");
 
       try {
-        const resultMask = await client.segmentAtPoints(newPoints);
+        const result = await client.segmentAtPoints(newPoints);
 
         if (generationRef.current === currentGen) {
-          setMask(resultMask);
+          setCandidates(result);
+          setSelectedCandidateIndex(0);
           statusRef.current = "ready";
           setStatus("ready");
         }
@@ -239,10 +249,22 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     [addPoint]
   );
 
+  const selectCandidate = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= candidates.length) {
+        return;
+      }
+      setSelectedCandidateIndex(index);
+    },
+    [candidates]
+  );
+
   return {
     status,
     image,
     mask,
+    candidates,
+    selectedCandidateIndex,
     points,
     layers,
     error,
@@ -253,5 +275,6 @@ export function useSegmentation(client: SamWorkerClient | null): UseSegmentation
     saveLayer,
     removeLayer,
     reset,
+    selectCandidate,
   };
 }

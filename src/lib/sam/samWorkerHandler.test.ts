@@ -76,7 +76,7 @@ describe("createSamWorkerHandler", () => {
     expect(response).toEqual({
       id: "b2",
       type: "result",
-      payload: { width: 2, height: 2, score: 0.9, data: new Uint8Array([0, 1, 0, 1]) },
+      payload: [{ width: 2, height: 2, score: 0.9, data: new Uint8Array([0, 1, 0, 1]) }],
     });
   });
 
@@ -120,7 +120,7 @@ describe("createSamWorkerHandler", () => {
     expect(response).toEqual({
       id: "sp-1",
       type: "result",
-      payload: { width: 2, height: 2, score: 0.9, data: new Uint8Array([0, 1, 0, 1]) },
+      payload: [{ width: 2, height: 2, score: 0.9, data: new Uint8Array([0, 1, 0, 1]) }],
     });
   });
 });
