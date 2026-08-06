@@ -39,16 +39,17 @@ Photoshop の「オブジェクト選択ツール」相当をブラウザだけ�
   ================== Web Worker 境界 ==================
         │
         ▼
-  [ユーザーが Canvas をクリック]                    components/segment/SegmentCanvas.tsx
+  [ユーザーが Canvas をクリック / Shift・Alt+クリック]  components/segment/SegmentCanvas.tsx
         │ clientX/clientY → toImageCoords() → 画像座標 (x, y)   lib/sam/coords.ts
+        │ 修飾キー無し=replace / Shift=positive追加 / Alt=negative追加
         ▼
-  useSegmentation.selectAt(x, y)                    hooks/useSegmentation.ts
-        │ client.segment(x, y)
+  useSegmentation.addPoint(x, y, label, { replace })  hooks/useSegmentation.ts
+        │ client.segmentAtPoints(points)   ※ points は現在の点セット全体（世代スナップショット）
         ▼
   ================== Web Worker 境界 ==================
         │
-  samSession.segmentAtPoint(x, y)                        lib/sam/samSession.ts
-        │  reshapeInputPoints → model.decode() → postProcessMasks()
+  samSession.segmentAtPoints(points)                      lib/sam/samSession.ts
+        │  reshapeInputPoints + addInputLabels → model.decode() → postProcessMasks()
         │  → binarizeMask() + pickBestMaskIndex()
         ▼
   SamMaskResult { data, width, height, score }
@@ -65,7 +66,9 @@ Photoshop の「オブジェクト選択ツール」相当をブラウザだけ�
                 └─ pixelsToPngBlob() → triggerDownload() / copyImageToClipboard()  lib/sam/download.ts
 ```
 
-embedding の計算（encoder）は画像 1 枚につき 1 回だけ。クリックのたびに走るのは decoder（`segmentAtPoint`）だけで、encoder より軽い。この非対称性が Worker 必須化（§4）の前提になっている。
+embedding の計算（encoder）は画像 1 枚につき 1 回だけ。クリックのたびに走るのは decoder（`segmentAtPoints`）だけで、encoder より軽い。この非対称性が Worker 必須化（§4）の前提になっている。
+
+`segmentAtPoint(x, y)`（単一点）も後方互換のため残っており、`useSegmentation.selectAt` は `addPoint(x, y, 1, { replace: true })` の薄いラッパーとして実装されている（`segmentAtPoint` 自体は現在どこからも呼ばれていないが、外部から見た挙動は変えない前提で API として維持）。
 
 ## 3. レイヤーと責務
 
@@ -73,23 +76,23 @@ embedding の計算（encoder）は画像 1 枚につき 1 回だけ。クリッ
 
 **表1: `src/lib/sam/` の各モジュールの責務と依存**
 
-| ファイル | 役割 | 依存してよいもの | 依存してはいけないもの |
-|---|---|---|---|
-| `types.ts` | `SamImageInput` / `SamMaskResult` の型定義 | なし | — |
-| `constants.ts` | `SAM_MODEL_ID` | なし | — |
-| `protocol.ts` | Worker⇄main 間のメッセージ型（`SamWorkerRequest` / `SamWorkerResponse`） | `types.ts` | `@huggingface/transformers` |
-| `device.ts` | WebGPU 検出（`detectDevice`） | `navigator.gpu`（DI 可能） | `@huggingface/transformers` |
-| `samSession.ts` | 推論のコアロジック本体。`setImage` / `segmentAtPoint`、世代ガード（§5）、`binarizeMask` / `pickBestMaskIndex` | `device.ts` の型、`types.ts`、**`SamRuntime` インターフェース経由でのみ**モデル/プロセッサを扱う | `@huggingface/transformers`（直接 import 禁止） |
-| `imageInputs.ts` | processor の生出力（snake_case）を `SamImageInputs`（camelCase）へ正規化 | `samSession.ts` の型のみ | `@huggingface/transformers` |
-| `transformersLoader.ts` | `@huggingface/transformers` を実際に呼び出し、`SamRuntime` を実装するアダプタ | `@huggingface/transformers`、`constants.ts`、`device.ts` の型、`samSession.ts` の型、`imageInputs.ts` | — |
-| `samWorkerHandler.ts` | Worker が受けたリクエストを `samSession` の呼び出しへルーティング | `device.ts`、`samSession.ts`、`protocol.ts` | `@huggingface/transformers` |
-| `sam.worker.ts` | Worker エントリポイント。`self.onmessage` を `samWorkerHandler` に配線するだけ | `samWorkerHandler.ts`、`transformersLoader.ts`、`protocol.ts` | — |
-| `samWorkerClient.ts` | main 側から Worker へ Promise ベースで問い合わせる API（id 相関・障害検知） | `protocol.ts`、`device.ts` の型、`types.ts` | `@huggingface/transformers` |
-| `coords.ts` | Canvas クリック座標 → 画像座標変換（`toImageCoords`） | なし（純関数） | — |
-| `maskOverlay.ts` | マスク → オーバーレイ表示用 RGBA 変換（`maskToOverlayPixels`） | `types.ts` | — |
-| `exportImage.ts` | マスク適用（`applyMaskToImage`）/ 白黒化（`maskToBlackAndWhite`） | `types.ts` | — |
-| `download.ts` | RGBA → PNG Blob 化、ダウンロード、クリップボードコピー、ファイル名生成 | `exportImage.ts` の型のみ | — |
-| `imageLoader.ts` | アップロードされた `File` を DOM `Image`/`Canvas` で RGBA 化 | `hooks/useSegmentation.ts` の `LoadedImage` 型 | — |
+| ファイル                | 役割                                                                                                                                                                                                                                    | 依存してよいもの                                                                                      | 依存してはいけないもの                          |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| `types.ts`              | `SamImageInput` / `SamMaskResult` の型定義                                                                                                                                                                                              | なし                                                                                                  | —                                               |
+| `constants.ts`          | `SAM_MODEL_ID`                                                                                                                                                                                                                          | なし                                                                                                  | —                                               |
+| `protocol.ts`           | Worker⇄main 間のメッセージ型（`SamWorkerRequest` / `SamWorkerResponse`）                                                                                                                                                                | `types.ts`                                                                                            | `@huggingface/transformers`                     |
+| `device.ts`             | WebGPU 検出（`detectDevice`）                                                                                                                                                                                                           | `navigator.gpu`（DI 可能）                                                                            | `@huggingface/transformers`                     |
+| `samSession.ts`         | 推論のコアロジック本体。`setImage` / `segmentAtPoint`（単一点・互換用） / `segmentAtPoints`（複数点、positive/negative ラベル対応）、世代ガード（§5、両メソッド共通の `runDecode` helper に集約）、`binarizeMask` / `pickBestMaskIndex` | `device.ts` の型、`types.ts`、**`SamRuntime` インターフェース経由でのみ**モデル/プロセッサを扱う      | `@huggingface/transformers`（直接 import 禁止） |
+| `imageInputs.ts`        | processor の生出力（snake_case）を `SamImageInputs`（camelCase）へ正規化                                                                                                                                                                | `samSession.ts` の型のみ                                                                              | `@huggingface/transformers`                     |
+| `transformersLoader.ts` | `@huggingface/transformers` を実際に呼び出し、`SamRuntime` を実装するアダプタ                                                                                                                                                           | `@huggingface/transformers`、`constants.ts`、`device.ts` の型、`samSession.ts` の型、`imageInputs.ts` | —                                               |
+| `samWorkerHandler.ts`   | Worker が受けたリクエストを `samSession` の呼び出しへルーティング                                                                                                                                                                       | `device.ts`、`samSession.ts`、`protocol.ts`                                                           | `@huggingface/transformers`                     |
+| `sam.worker.ts`         | Worker エントリポイント。`self.onmessage` を `samWorkerHandler` に配線するだけ                                                                                                                                                          | `samWorkerHandler.ts`、`transformersLoader.ts`、`protocol.ts`                                         | —                                               |
+| `samWorkerClient.ts`    | main 側から Worker へ Promise ベースで問い合わせる API（id 相関・障害検知）                                                                                                                                                             | `protocol.ts`、`device.ts` の型、`types.ts`                                                           | `@huggingface/transformers`                     |
+| `coords.ts`             | Canvas クリック座標 → 画像座標変換（`toImageCoords`）                                                                                                                                                                                   | なし（純関数）                                                                                        | —                                               |
+| `maskOverlay.ts`        | マスク → オーバーレイ表示用 RGBA 変換（`maskToOverlayPixels`）                                                                                                                                                                          | `types.ts`                                                                                            | —                                               |
+| `exportImage.ts`        | マスク適用（`applyMaskToImage`）/ 白黒化（`maskToBlackAndWhite`）                                                                                                                                                                       | `types.ts`                                                                                            | —                                               |
+| `download.ts`           | RGBA → PNG Blob 化、ダウンロード、クリップボードコピー、ファイル名生成                                                                                                                                                                  | `exportImage.ts` の型のみ                                                                             | —                                               |
+| `imageLoader.ts`        | アップロードされた `File` を DOM `Image`/`Canvas` で RGBA 化                                                                                                                                                                            | `hooks/useSegmentation.ts` の `LoadedImage` 型                                                        | —                                               |
 
 ### `@huggingface/transformers` への依存を `transformersLoader.ts` 1 ファイルに封じ込めている理由
 
@@ -120,7 +123,7 @@ type SamWorkerResponse =
 
 - **main → worker**: `samWorkerClient.ts` がリクエストごとに `id`（`sam-req-<連番>`）を発行し、`pending: Map<id, {resolve, reject}>` で紐づけて `postMessage`
 - **worker → main**: `sam.worker.ts` の `self.onmessage` が `samWorkerHandler.handle()` を呼び、結果を同じ `id` を付けて `postMessage` で返す
-- `samWorkerHandler.handle()` は `switch (request.type)` で `init` → `detectDevice()` + `createSamSession()`、`setImage` → `session.setImage()`、`segment` → `session.segmentAtPoint()` にルーティングし、例外は `try/catch` で `{ type: "error" }` に変換して返す（Worker 側で投げっぱなしにしない）
+- `samWorkerHandler.handle()` は `switch (request.type)` で `init` → `detectDevice()` + `createSamSession()`、`setImage` → `session.setImage()`、`segment` → `session.segmentAtPoint()`、`segmentPoints` → `session.segmentAtPoints()` にルーティングし、例外は `try/catch` で `{ type: "error" }` に変換して返す（Worker 側で投げっぱなしにしない）
 
 ### Worker が必須な理由
 
@@ -140,11 +143,11 @@ Worker のモジュール読み込み失敗・モデル初期化中のクラッ�
 
 **表2: 世代カウンタの配置**
 
-| 種類 | 場所 | 守っているもの | 破棄の方法 |
-|---|---|---|---|
-| **embedding の世代**（Worker 側） | `samSession.ts` の `generation` / `currentEmbeddingsGeneration` | 保持している embedding が最新の `setImage` 呼び出しに属するか。`segmentAtPoint` 内の**すべての await 明け**（`decode()` 後、`postProcessMasks()` 後）で `embeddingGeneration !== generation` を確認し、不一致なら `SamStaleRequestError` を throw して内部状態を上書きしない | `SamStaleRequestError` |
-| **デコードの世代**（main 側・画像/マスク） | `useSegmentation.ts` の `generationRef` | 表示中のマスクがどの画像/どの選択に対応するか。`setImage` の完了時・`selectAt` の完了時に `generationRef.current === currentGen` を確認してから state を更新する。`SamStaleRequestError` を受けたときはエラー扱いにせず黙って `ready` へ戻す | 黙って state 更新をスキップ |
-| **デコードの世代**（main 側・ファイル） | `ImageDropzone.tsx` の `generationRef` | アップロードされたファイルの `fileToLoadedImage()`（DOM Image デコード）の結果がどの選択に属するか。アンマウント時にも世代を進める | 黙って `onImageLoaded` を呼ばず `objectUrl` を解放 |
+| 種類                                       | 場所                                                            | 守っているもの                                                                                                                                                                                                                                                                                                                                                                                                                                               | 破棄の方法                                         |
+| ------------------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------- |
+| **embedding の世代**（Worker 側）          | `samSession.ts` の `generation` / `currentEmbeddingsGeneration` | 保持している embedding が最新の `setImage` 呼び出しに属するか。`segmentAtPoint` 内の**すべての await 明け**（`decode()` 後、`postProcessMasks()` 後）で `embeddingGeneration !== generation` を確認し、不一致なら `SamStaleRequestError` を throw して内部状態を上書きしない                                                                                                                                                                                 | `SamStaleRequestError`                             |
+| **デコードの世代**（main 側・画像/マスク） | `useSegmentation.ts` の `generationRef`                         | 表示中のマスクがどの画像/どの選択に対応するか。`setImage` の完了時・`addPoint` の完了時に `generationRef.current === currentGen` を確認してから state を更新する。`SamStaleRequestError` を受けたときはエラー扱いにせず黙って `ready` へ戻す。`clearPoints` も世代を進めるが、`status` が `preparing`/`idle` の間は何もしない（`setImage` 準備中に呼ばれても画面が復旧不能なエラー状態にならないようにするため。issue #9 で codex レビューにより発見・修正） | 黙って state 更新をスキップ                        |
+| **デコードの世代**（main 側・ファイル）    | `ImageDropzone.tsx` の `generationRef`                          | アップロードされたファイルの `fileToLoadedImage()`（DOM Image デコード）の結果がどの選択に属するか。アンマウント時にも世代を進める                                                                                                                                                                                                                                                                                                                           | 黙って `onImageLoaded` を呼ばず `objectUrl` を解放 |
 
 判定の基準は「最新のリクエスト世代」ではなく「**保持しているデータが属する世代**」であることが重要（ADR 0002）。前者では `setImage` の**準備中**（世代は進んでいるが embedding はまだ古い画像のまま）を検出できず、新しい画像の座標に対して古い画像の embedding で推論してしまう。`samSession.ts` が `generation`（最新の setImage 世代）と `currentEmbeddingsGeneration`（保持中の embedding の世代）を別変数として持っているのはこのため。
 
@@ -162,12 +165,12 @@ Worker のモジュール読み込み失敗・モデル初期化中のクラッ�
 
 **表3: coverage 除外ファイルと理由**
 
-| ファイル | 除外理由 |
-|---|---|
-| `src/components/ui/time-picker.tsx` | `shared-react-ui` 由来の共有 UI プリミティブ。SAM 機能とは無関係で、compose 時に無条件で入る。カバレッジ担保は `shared-react-ui` 側のギャラリーで行う方針 |
-| `src/lib/sam/sam.worker.ts` | `self.onmessage` を handler に繋ぐだけの Worker エントリポイント。jsdom には実 Worker ランタイムが無く実行できない。ルーティングされる先のロジック（`samWorkerHandler.ts`）は直接ユニットテストされている |
+| ファイル                            | 除外理由                                                                                                                                                                                                                             |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `src/components/ui/time-picker.tsx` | `shared-react-ui` 由来の共有 UI プリミティブ。SAM 機能とは無関係で、compose 時に無条件で入る。カバレッジ担保は `shared-react-ui` 側のギャラリーで行う方針                                                                            |
+| `src/lib/sam/sam.worker.ts`         | `self.onmessage` を handler に繋ぐだけの Worker エントリポイント。jsdom には実 Worker ランタイムが無く実行できない。ルーティングされる先のロジック（`samWorkerHandler.ts`）は直接ユニットテストされている                            |
 | `src/lib/sam/transformersLoader.ts` | `@huggingface/transformers` の薄いアダプタ。実パッケージをテストで import するとモデル重みを引いてきて CI が遅く flaky になる。`samSession.ts` は fake `SamRuntime` でテストされるため、このアダプタ自体には専用ユニットテストが無い |
-| `src/lib/sam/imageLoader.ts` | `File` → RGBA `ImageData` の変換に DOM `Image` デコードと Canvas 2D コンテキストを使うが、jsdom はこれらをサポートしない。`isImageFile` は別途ユニットテスト済み |
+| `src/lib/sam/imageLoader.ts`        | `File` → RGBA `ImageData` の変換に DOM `Image` デコードと Canvas 2D コンテキストを使うが、jsdom はこれらをサポートしない。`isImageFile` は別途ユニットテスト済み                                                                     |
 
 ### 「実装を一時的に壊して赤くなることを確認する」運用
 
@@ -188,21 +191,22 @@ TDD の「先に赤を見る」と目的は同じだが、**修正系のタス�
 
 **表4: 典型的な変更と触るファイル**
 
-| やりたいこと | 触るファイル |
-|---|---|
-| モデルを変える | `src/lib/sam/constants.ts`（`SAM_MODEL_ID`）。`SamRuntime` / `SamModelLike` / `SamProcessorLike`（`src/lib/sam/samSession.ts`）を満たす限り、`transformersLoader.ts` 側の実装だけで差し替えが完結する |
-| オーバーレイの色を変える | `src/components/segment/SegmentCanvas.tsx`（`maskToOverlayPixels` 呼び出し箇所の `{ r, g, b, a }` 引数）。変換ロジック自体は `src/lib/sam/maskOverlay.ts` |
-| 書き出し形式を足す | `src/lib/sam/exportImage.ts`（変換関数を追加）＋ `src/lib/sam/download.ts`（`buildExportFilename` の `kind` 引数を拡張）＋ `src/components/segment/ExportBar.tsx`（ボタンと `runExport` 呼び出しを追加） |
-| 入力方式を複数点（positive/negative や box）に拡張する | `src/lib/sam/protocol.ts`（`segment` リクエストの型を複数点対応に）＋ `src/lib/sam/samSession.ts` の `segmentAtPoint`（`reshapeInputPoints` へ渡す配列を複数点対応に）＋ `src/components/segment/SegmentCanvas.tsx`（クリックイベントの蓄積・修飾キー処理）＋ `src/hooks/useSegmentation.ts` の `selectAt` シグネチャ。issue #1 の決定ではこれは MVP 対象外で enhancement issue 切り出し予定だった項目 |
-| WebGPU/WASM の判定条件を変える | `src/lib/sam/device.ts`（`detectDevice`） |
-| Worker⇄main のメッセージ種別を増やす | `src/lib/sam/protocol.ts`（型追加）＋ `src/lib/sam/samWorkerHandler.ts`（`switch` にケース追加）＋ `src/lib/sam/samWorkerClient.ts`（呼び出し用メソッド追加） |
-| アップロードできるファイルの検証ルールを変える | `src/lib/sam/imageLoader.ts`（`isImageFile`） |
-| クリック座標の変換ロジックを変える（表示縮小率の扱い等） | `src/lib/sam/coords.ts`（`toImageCoords`） |
-| coverage 閾値・除外対象を変える | `vitest.config.ts` の `coverage.exclude`、`.github/workflows/ci.yml` の閾値判定（`80` の箇所） |
-| dev/build/test/lint コマンドを変える | `Makefile`（`make help` で一覧）。`ci` ターゲットは `lint format-check test-cov build` で、`build`（`npm run build` = `tsc -b && vite build`）が型チェックを兼ねる。CI ワークフロー（`.github/workflows/ci.yml`）はこれとは別に `npx tsc -b --noEmit` を明示ステップとして持つ（issue #5 で `tsc --noEmit`（`-b` なし）が0ファイルしか検査していなかった過去の不具合を踏まえた明示化） |
+| やりたいこと                                                                           | 触るファイル                                                                                                                                                                                                                                                                                                                                                                           |
+| -------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| モデルを変える                                                                         | `src/lib/sam/constants.ts`（`SAM_MODEL_ID`）。`SamRuntime` / `SamModelLike` / `SamProcessorLike`（`src/lib/sam/samSession.ts`）を満たす限り、`transformersLoader.ts` 側の実装だけで差し替えが完結する                                                                                                                                                                                  |
+| オーバーレイの色を変える                                                               | `src/components/segment/SegmentCanvas.tsx`（`maskToOverlayPixels` 呼び出し箇所の `{ r, g, b, a }` 引数）。変換ロジック自体は `src/lib/sam/maskOverlay.ts`                                                                                                                                                                                                                              |
+| 書き出し形式を足す                                                                     | `src/lib/sam/exportImage.ts`（変換関数を追加）＋ `src/lib/sam/download.ts`（`buildExportFilename` の `kind` 引数を拡張）＋ `src/components/segment/ExportBar.tsx`（ボタンと `runExport` 呼び出しを追加）                                                                                                                                                                               |
+| positive/negative 複数点入力をさらに拡張する（点の個数上限、視覚的なやり直しUI改善等） | issue #9（PR #14）で実装済み: `src/lib/sam/samSession.ts` の `segmentAtPoints`、`src/components/segment/SegmentCanvas.tsx` の Shift/Alt 修飾キー判定、`src/hooks/useSegmentation.ts` の `addPoint`/`clearPoints`。**box（ドラッグ矩形）指定は現行モデルでは実装しない**（`docs/adr/0004-slimsam-box-input-unsupported.md` 参照。ONNX グラフが `input_boxes` を宣言していない）         |
+| WebGPU/WASM の判定条件を変える                                                         | `src/lib/sam/device.ts`（`detectDevice`）                                                                                                                                                                                                                                                                                                                                              |
+| Worker⇄main のメッセージ種別を増やす                                                   | `src/lib/sam/protocol.ts`（型追加）＋ `src/lib/sam/samWorkerHandler.ts`（`switch` にケース追加）＋ `src/lib/sam/samWorkerClient.ts`（呼び出し用メソッド追加）                                                                                                                                                                                                                          |
+| アップロードできるファイルの検証ルールを変える                                         | `src/lib/sam/imageLoader.ts`（`isImageFile`）                                                                                                                                                                                                                                                                                                                                          |
+| クリック座標の変換ロジックを変える（表示縮小率の扱い等）                               | `src/lib/sam/coords.ts`（`toImageCoords`）                                                                                                                                                                                                                                                                                                                                             |
+| coverage 閾値・除外対象を変える                                                        | `vitest.config.ts` の `coverage.exclude`、`.github/workflows/ci.yml` の閾値判定（`80` の箇所）                                                                                                                                                                                                                                                                                         |
+| dev/build/test/lint コマンドを変える                                                   | `Makefile`（`make help` で一覧）。`ci` ターゲットは `lint format-check test-cov build` で、`build`（`npm run build` = `tsc -b && vite build`）が型チェックを兼ねる。CI ワークフロー（`.github/workflows/ci.yml`）はこれとは別に `npx tsc -b --noEmit` を明示ステップとして持つ（issue #5 で `tsc --noEmit`（`-b` なし）が0ファイルしか検査していなかった過去の不具合を踏まえた明示化） |
 
 ## 8. 参考
 
 - GitHub issue [#1](https://github.com/rengotaku/smart-object-select/issues/1)（親 issue・Decision Log。論点1〜6の決定と根拠）
 - `docs/adr/0001-client-side-sam-in-web-worker.md`（クライアントサイド実行・Worker 必須化の決定）
 - `docs/adr/0002-generation-guards-for-async-races.md`（世代カウンタの設計、テストの扱い）
+- `docs/adr/0004-slimsam-box-input-unsupported.md`（box プロンプトが現行モデルで機能しない理由、positive/negative 複数点への切り替え）
