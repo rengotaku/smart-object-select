@@ -36,6 +36,7 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
     device,
     client,
     error: engineError,
+    progress: engineProgress,
   } = useSamEngine(createClient);
   const {
     status: segStatus,
@@ -54,6 +55,19 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
     reset,
     selectCandidate,
   } = useSegmentation(client);
+
+  // 進捗通知が届くまでは総量が分からないため「モデルを読み込んでいます」（進捗なし）を
+  // 既定表示にする。total が取れない（null）ファイルはパーセントを出さずフォールバックする。
+  const engineLoadingLabel = (() => {
+    if (!engineProgress) {
+      return "モデルを読み込んでいます";
+    }
+    if (engineProgress.total === null) {
+      return "モデルを読み込み中...";
+    }
+    const percent = Math.round((engineProgress.loaded / engineProgress.total) * 100);
+    return `モデルを読み込み中... ${percent}%`;
+  })();
 
   return (
     <div className="space-y-6">
@@ -92,7 +106,7 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
           <CardContent>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="size-4 animate-spin" aria-hidden="true" />
-              <span>モデルを読み込んでいます</span>
+              <span>{engineLoadingLabel}</span>
             </div>
           </CardContent>
         </Card>

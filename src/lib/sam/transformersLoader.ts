@@ -1,7 +1,13 @@
-import { AutoProcessor, RawImage, SamModel } from "@huggingface/transformers";
+import {
+  AutoProcessor,
+  RawImage,
+  SamModel,
+  type ProgressInfo,
+} from "@huggingface/transformers";
 import { SAM_MODEL_ID } from "./constants";
 import type { SamDevice } from "./device";
 import { normalizeImageInputs } from "./imageInputs";
+import type { SamProgressEvent } from "./protocol";
 import type {
   MaskTensorLike,
   SamModelLike,
@@ -57,6 +63,54 @@ function toRawImage(image: SamImageInput): RawImage {
   return new RawImage(image.data, image.width, image.height, 4);
 }
 
+/**
+ * `@huggingface/transformers` の `progress_callback` は status 別の union
+ * （initiate/download/progress/done/ready/progress_total）を渡してくる。
+ * SamModel/AutoProcessor はいずれも複数ファイルを取得しうるため、`from_pretrained` は
+ * 渡された callback を内部で `DefaultProgressCallback` にラップし、ファイル単位の
+ * `status === "progress"` を通知する直前に必ず全ファイル集約値の
+ * `status === "progress_total"` を先に通知する
+ * （node_modules/@huggingface/transformers/src/utils/core.js の
+ * `DefaultProgressCallback._call` で実読して確認済み）。
+ *
+ * ただしこの `progress_total` の集計は `from_pretrained()` 呼び出し単位（内部で
+ * 生成される `DefaultProgressCallback` インスタンス単位）で完結しており、
+ * `loadModel()` と `loadProcessor()` をまたいで引き継がれない
+ * （node_modules/@huggingface/transformers/src/models/modeling_utils.js
+ * 313-345行付近で `from_pretrained` ごとに新規 `DefaultProgressCallback` が
+ * 生成されることを実読して確認済み）。そのため model 取得完了直後に
+ * processor 取得が始まると、集約値が小さい値へ後退して見える。
+ *
+ * ライブラリ内部のラップ・集計挙動に依存しないよう、ここではファイル単位の生イベント
+ * `status === "progress"`（内部ラップの有無に関わらず必ず発火する一次情報）のみを使い、
+ * `loadModel()`/`loadProcessor()` の両呼び出しをまたいで永続する `filesLoaded` map で
+ * 自前集計する。`progress_total` は今後使わない。
+ */
+function createProgressCallback(
+  onProgress: ((event: SamProgressEvent) => void) | undefined,
+  filesLoaded: Map<string, { loaded: number; total: number }>
+): (info: ProgressInfo) => void {
+  return (info: ProgressInfo) => {
+    if (!onProgress || info.status !== "progress") {
+      return;
+    }
+    filesLoaded.set(info.file, { loaded: info.loaded, total: info.total });
+
+    let loaded = 0;
+    let total = 0;
+    for (const entry of filesLoaded.values()) {
+      loaded += entry.loaded;
+      total += entry.total;
+    }
+
+    onProgress({
+      file: info.file,
+      loaded,
+      total: total > 0 ? total : null,
+    });
+  };
+}
+
 function wrapModel(model: TransformersSamModel): SamModelLike {
   return {
     async getImageEmbeddings(inputs) {
@@ -105,14 +159,26 @@ function wrapProcessor(processor: TransformersSamProcessor): SamProcessorLike {
   };
 }
 
-export function createTransformersSamRuntime(): SamRuntime {
+export function createTransformersSamRuntime(
+  onProgress?: (event: SamProgressEvent) => void
+): SamRuntime {
+  // loadModel()/loadProcessor() をまたいで永続させ、model→processor 間で
+  // 集計値が後退しないようにする（詳細は createProgressCallback 直上のコメント参照）。
+  const filesLoaded = new Map<string, { loaded: number; total: number }>();
+  const progress_callback = createProgressCallback(onProgress, filesLoaded);
+
   return {
     async loadModel(device: SamDevice) {
-      const model = await SamModel.from_pretrained(SAM_MODEL_ID, { device });
+      const model = await SamModel.from_pretrained(SAM_MODEL_ID, {
+        device,
+        progress_callback,
+      });
       return wrapModel(model as unknown as TransformersSamModel);
     },
     async loadProcessor() {
-      const processor = await AutoProcessor.from_pretrained(SAM_MODEL_ID);
+      const processor = await AutoProcessor.from_pretrained(SAM_MODEL_ID, {
+        progress_callback,
+      });
       return wrapProcessor(processor as unknown as TransformersSamProcessor);
     },
   };

@@ -3,9 +3,20 @@
  */
 import { createSamWorkerHandler } from "./samWorkerHandler";
 import { createTransformersSamRuntime } from "./transformersLoader";
-import type { SamWorkerRequest } from "./protocol";
+import type {
+  SamProgressEvent,
+  SamWorkerNotification,
+  SamWorkerRequest,
+} from "./protocol";
 
-const handler = createSamWorkerHandler(createTransformersSamRuntime());
+// ダウンロード進捗は id 相関の request/response とは別種のメッセージとして流す
+// （既存の pending map 相関ロジックには一切関与しない）。
+function postProgress(event: SamProgressEvent): void {
+  const notification: SamWorkerNotification = { type: "progress", ...event };
+  self.postMessage(notification);
+}
+
+const handler = createSamWorkerHandler(createTransformersSamRuntime(postProgress));
 
 self.onmessage = (event: MessageEvent<SamWorkerRequest>) => {
   void handler.handle(event.data).then((response) => {

@@ -3,7 +3,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { SegmentPage } from "./SegmentPage";
 import * as imageLoaderModule from "@/lib/sam/imageLoader";
 import type { LoadedImage } from "@/hooks";
-import type { SamWorkerClient, SamDevice, SamMaskResult } from "@/lib/sam";
+import type {
+  SamWorkerClient,
+  SamDevice,
+  SamMaskResult,
+  SamProgressEvent,
+} from "@/lib/sam";
 
 function createDeferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -39,6 +44,7 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
         },
       ]
     ),
+    onProgress: vi.fn(() => () => {}),
     terminate: vi.fn(),
     ...overrides,
   };
@@ -73,6 +79,44 @@ describe("SegmentPage", () => {
     render(<SegmentPage createClient={() => client} />);
 
     expect(screen.getByText("モデルを読み込んでいます")).toBeInTheDocument();
+  });
+
+  it("追加: 初期化中に progress 通知を受け取るとパーセント表示に切り替わる", async () => {
+    let progressListener: ((event: SamProgressEvent) => void) | undefined;
+    const client = createFakeClient({
+      init: vi.fn(() => new Promise<SamDevice>(() => {})),
+      onProgress: vi.fn((listener: (event: SamProgressEvent) => void) => {
+        progressListener = listener;
+        return () => {};
+      }),
+    });
+    render(<SegmentPage createClient={() => client} />);
+
+    expect(screen.getByText("モデルを読み込んでいます")).toBeInTheDocument();
+
+    act(() => {
+      progressListener?.({ file: "model.onnx", loaded: 42, total: 100 });
+    });
+
+    expect(screen.getByText("モデルを読み込み中... 42%")).toBeInTheDocument();
+  });
+
+  it("追加: total が不明な progress 通知ではパーセントを表示せず「読み込み中」のみ表示する", async () => {
+    let progressListener: ((event: SamProgressEvent) => void) | undefined;
+    const client = createFakeClient({
+      init: vi.fn(() => new Promise<SamDevice>(() => {})),
+      onProgress: vi.fn((listener: (event: SamProgressEvent) => void) => {
+        progressListener = listener;
+        return () => {};
+      }),
+    });
+    render(<SegmentPage createClient={() => client} />);
+
+    act(() => {
+      progressListener?.({ file: "model.onnx", loaded: 10, total: null });
+    });
+
+    expect(screen.getByText("モデルを読み込み中...")).toBeInTheDocument();
   });
 
   it("Case 17: device が wasm のとき WebGPU 不可・処理に時間がかかる旨の警告が表示される", async () => {

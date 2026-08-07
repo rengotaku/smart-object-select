@@ -1,6 +1,11 @@
 import type { SamDevice } from "./device";
 import type { SamImageInput, SamMaskResult, SegmentPoint } from "./types";
-import type { SamWorkerRequest, SamWorkerResponse } from "./protocol";
+import type {
+  SamProgressEvent,
+  SamWorkerNotification,
+  SamWorkerRequest,
+  SamWorkerResponse,
+} from "./protocol";
 
 type WorkerEventType = "message" | "error" | "messageerror";
 
@@ -22,6 +27,11 @@ export interface SamWorkerClient {
   setImage(image: SamImageInput): Promise<void>;
   segment(x: number, y: number): Promise<SamMaskResult[]>;
   segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult[]>;
+  /**
+   * ダウンロード進捗通知を購読する。id 相関の pending map とは別経路。
+   * 戻り値の関数を呼ぶと購読解除する。
+   */
+  onProgress(listener: (progress: SamProgressEvent) => void): () => void;
   terminate(): void;
 }
 
@@ -40,9 +50,33 @@ export function createSamWorkerClient(
   idFactory: () => string = createDefaultIdFactory()
 ): SamWorkerClient {
   const pending = new Map<string, PendingRequest>();
+  const progressListeners = new Set<(progress: SamProgressEvent) => void>();
+
+  // 通知は id を持たない（SamWorkerResponse は必ず id を持つ）ため、
+  // type === "progress" で判別できる。
+  function isProgressNotification(data: unknown): data is SamWorkerNotification {
+    return (
+      typeof data === "object" &&
+      data !== null &&
+      (data as { type?: unknown }).type === "progress"
+    );
+  }
 
   function onMessage(event: { data: unknown }): void {
-    const response = event.data as SamWorkerResponse;
+    const data = event.data;
+    if (isProgressNotification(data)) {
+      const progress: SamProgressEvent = {
+        file: data.file,
+        loaded: data.loaded,
+        total: data.total,
+      };
+      for (const listener of progressListeners) {
+        listener(progress);
+      }
+      return;
+    }
+
+    const response = data as SamWorkerResponse;
     const request = pending.get(response.id);
     if (!request) {
       return;
@@ -122,6 +156,12 @@ export function createSamWorkerClient(
     },
     segmentAtPoints(points: SegmentPoint[]): Promise<SamMaskResult[]> {
       return send<SamMaskResult[]>({ id: idFactory(), type: "segmentAtPoints", points });
+    },
+    onProgress(listener: (progress: SamProgressEvent) => void): () => void {
+      progressListeners.add(listener);
+      return () => {
+        progressListeners.delete(listener);
+      };
     },
     terminate(): void {
       worker.removeEventListener("message", onMessage);

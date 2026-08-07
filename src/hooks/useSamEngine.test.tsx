@@ -1,7 +1,12 @@
-import { renderHook, waitFor } from "@testing-library/react";
+import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { useSamEngine, type UseSamEngineResult } from "./useSamEngine";
-import type { SamWorkerClient, SamDevice, SamMaskResult } from "@/lib/sam";
+import type {
+  SamWorkerClient,
+  SamDevice,
+  SamMaskResult,
+  SamProgressEvent,
+} from "@/lib/sam";
 
 function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerClient {
   return {
@@ -27,6 +32,7 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
         },
       ]
     ),
+    onProgress: vi.fn(() => () => {}),
     terminate: vi.fn(),
     ...overrides,
   };
@@ -164,5 +170,50 @@ describe("useSamEngine", () => {
       expect(result?.current.status).toBe("error");
     });
     expect(result?.current.error).toBe(failure);
+  });
+
+  it("追加: onProgress 経由の通知を progress 状態に反映する", async () => {
+    let progressListener: ((event: SamProgressEvent) => void) | undefined;
+    const client = createFakeClient({
+      init: vi.fn(() => new Promise<SamDevice>(() => {})),
+      onProgress: vi.fn((listener: (event: SamProgressEvent) => void) => {
+        progressListener = listener;
+        return () => {
+          progressListener = undefined;
+        };
+      }),
+    });
+    const { result } = renderHook(() => useSamEngine(() => client));
+
+    await waitFor(() => {
+      expect(client.onProgress).toHaveBeenCalledTimes(1);
+    });
+    expect(result.current.progress).toBeNull();
+
+    act(() => {
+      progressListener?.({ file: "model.onnx", loaded: 10, total: 100 });
+    });
+
+    expect(result.current.progress).toEqual({
+      file: "model.onnx",
+      loaded: 10,
+      total: 100,
+    });
+  });
+
+  it("追加: アンマウント時に onProgress の unsubscribe を呼ぶ", async () => {
+    const unsubscribe = vi.fn();
+    const client = createFakeClient({
+      onProgress: vi.fn(() => unsubscribe),
+    });
+    const { result, unmount } = renderHook(() => useSamEngine(() => client));
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("ready");
+    });
+
+    unmount();
+
+    expect(unsubscribe).toHaveBeenCalledTimes(1);
   });
 });
