@@ -2,6 +2,7 @@ import {
   AutoProcessor,
   RawImage,
   SamModel,
+  env,
   type ProgressInfo,
 } from "@huggingface/transformers";
 import { SAM_MODEL_ID } from "./constants";
@@ -15,11 +16,41 @@ import type {
   SamRuntime,
 } from "./samSession";
 import type { SamImageInput } from "./types";
+import { resolveSelfHostedWasmPaths } from "./wasmRuntimePaths";
 
 /**
  * `@huggingface/transformers` への直接依存はこのファイルにのみ閉じ込める。
  * samSession / samWorkerHandler / samWorkerClient はこのパッケージを import しない。
  */
+
+/**
+ * モデル・WASM ランタイムの取得元を自ホストパス（同一オリジン）に固定する。
+ * `SamModel`/`AutoProcessor` の import 時点で onnxruntime-web は
+ * `env.backends.onnx.wasm.wasmPaths` を jsDelivr CDN の URL に既定初期化するため
+ * （node_modules/@huggingface/transformers/src/backends/onnx.js 参照）、
+ * それを自ホストパスへ上書きする。この関数はモジュールロード時に一度だけ実行される。
+ */
+function configureSelfHostedEnv(): void {
+  env.allowRemoteModels = false;
+  env.allowLocalModels = true;
+  env.localModelPath = "/models/";
+  // `env.backends.onnx.wasm` 自体は onnxruntime-web 側で import 時に populate 済みの
+  // オブジェクト（readonly な参照だが中身は可変）。参照を差し替えず中身のみ上書きする。
+  if (env.backends.onnx.wasm) {
+    env.backends.onnx.wasm.wasmPaths = resolveSelfHostedWasmPaths();
+  }
+}
+
+configureSelfHostedEnv();
+
+/**
+ * `device` ごとの既定 dtype（`wasm` → 量子化 `q8` / `webgpu` → 非量子化 `fp32`）に従うと、
+ * WebGPU が検出された環境では自ホストしていない非量子化ファイルを要求してしまう
+ * （node_modules/@huggingface/transformers/src/utils/dtypes.js の
+ * `DEFAULT_DEVICE_DTYPE_MAPPING` 参照。`webgpu` にはエントリが無く `fp32` にフォールバックする）。
+ * 自ホストしているのは量子化済みファイルのみのため、device に関わらず `q8` を明示指定する。
+ */
+const MODEL_DTYPE = "q8";
 
 interface TransformersTensor {
   data: Uint8Array | Float32Array;
@@ -171,6 +202,7 @@ export function createTransformersSamRuntime(
     async loadModel(device: SamDevice) {
       const model = await SamModel.from_pretrained(SAM_MODEL_ID, {
         device,
+        dtype: MODEL_DTYPE,
         progress_callback,
       });
       return wrapModel(model as unknown as TransformersSamModel);
