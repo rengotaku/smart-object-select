@@ -1,7 +1,12 @@
 export { SAM_MODEL_ID } from "./constants";
 export type { SamImageInput, SamMaskResult, SegmentPoint } from "./types";
 export { detectDevice, type SamDevice, type GpuLike, type NavigatorLike } from "./device";
-export type { SamWorkerRequest, SamWorkerResponse } from "./protocol";
+export type {
+  SamWorkerRequest,
+  SamWorkerResponse,
+  SamProgressEvent,
+  SamWorkerNotification,
+} from "./protocol";
 export {
   createSamSession,
   binarizeMask,

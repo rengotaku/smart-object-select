@@ -42,6 +42,7 @@ function createFakeClient(overrides: Partial<SamWorkerClient> = {}): SamWorkerCl
         },
       ]
     ),
+    onProgress: vi.fn(() => () => {}),
     terminate: vi.fn(),
     ...overrides,
   };

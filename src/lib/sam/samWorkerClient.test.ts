@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createSamWorkerClient, type WorkerLike } from "./samWorkerClient";
+import type { SamProgressEvent } from "./protocol";
 
 type FakeWorkerEventType = "message" | "error" | "messageerror";
 
@@ -228,5 +229,75 @@ describe("createSamWorkerClient", () => {
 
     const result = await promise;
     expect(result).toEqual(fakeMasks);
+  });
+
+  it("Case 1: 進捗通知が subscriber に伝播する", () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "id1");
+    const received: SamProgressEvent[] = [];
+
+    client.onProgress((progress) => {
+      received.push(progress);
+    });
+
+    worker.emit({ type: "progress", file: "model.onnx", loaded: 10, total: 100 });
+
+    expect(received).toEqual([{ file: "model.onnx", loaded: 10, total: 100 }]);
+  });
+
+  it("Case 2: id 相関の request/response は progress 通知の影響を受けない", async () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "seg1");
+    const progressListener = vi.fn();
+    client.onProgress(progressListener);
+
+    const promise = client.segment(1, 1);
+
+    worker.emit({ type: "progress", file: "model.onnx", loaded: 1, total: 100 });
+    worker.emit({ type: "progress", file: "model.onnx", loaded: 2, total: 100 });
+
+    const fakeMasks = [{ width: 1, height: 1, score: 1, data: new Uint8Array([1]) }];
+    worker.emit({ id: "seg1", type: "result", payload: fakeMasks });
+
+    const result = await promise;
+
+    expect(result).toEqual(fakeMasks);
+    expect(progressListener).toHaveBeenCalledTimes(2);
+  });
+
+  it("Case 3: subscribe していない状態で progress 通知が来ても例外を投げない", () => {
+    const worker = new FakeWorker();
+    createSamWorkerClient(worker, () => "id2");
+
+    expect(() => {
+      worker.emit({ type: "progress", file: "model.onnx", loaded: 1, total: 100 });
+    }).not.toThrow();
+  });
+
+  it("Case 4: unsubscribe 後は通知が届かない", () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "id3");
+    const listener = vi.fn();
+
+    const unsubscribe = client.onProgress(listener);
+    unsubscribe();
+
+    worker.emit({ type: "progress", file: "model.onnx", loaded: 1, total: 100 });
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+
+  it("追加: total が不明（0）な progress 通知は total: null として通知される", () => {
+    const worker = new FakeWorker();
+    const client = createSamWorkerClient(worker, () => "id4");
+    const received: SamProgressEvent[] = [];
+
+    client.onProgress((progress) => {
+      received.push(progress);
+    });
+
+    worker.emit({ type: "progress", file: "model.onnx", loaded: 5, total: null });
+
+    expect(received).toEqual([{ file: "model.onnx", loaded: 5, total: null }]);
   });
 });

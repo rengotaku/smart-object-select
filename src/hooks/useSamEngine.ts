@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
-import { createSamWorkerClient, type SamDevice, type SamWorkerClient } from "@/lib/sam";
+import {
+  createSamWorkerClient,
+  type SamDevice,
+  type SamProgressEvent,
+  type SamWorkerClient,
+} from "@/lib/sam";
 
 export type SamEngineStatus = "idle" | "initializing" | "ready" | "error";
 
@@ -8,6 +13,8 @@ export interface UseSamEngineResult {
   device: SamDevice | null;
   error: Error | null;
   client: SamWorkerClient | null;
+  /** モデルダウンロードの進捗。通知が来るまでは null。 */
+  progress: SamProgressEvent | null;
 }
 
 /**
@@ -33,6 +40,7 @@ export function useSamEngine(createClient?: () => SamWorkerClient): UseSamEngine
   const [device, setDevice] = useState<SamDevice | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [client, setClient] = useState<SamWorkerClient | null>(null);
+  const [progress, setProgress] = useState<SamProgressEvent | null>(null);
 
   // createClient は初回レンダー時点の値だけを使う（マウント/アンマウントの
   // 1回だけ初期化 effect を走らせるための lazy snapshot。以後の再レンダーで
@@ -66,6 +74,13 @@ export function useSamEngine(createClient?: () => SamWorkerClient): UseSamEngine
       };
     }
 
+    // 進捗通知は init() の解決前（モデルダウンロード中）に届くため、init() 呼び出しより
+    // 先に subscribe しておく必要がある。
+    const unsubscribeProgress = instance.onProgress((event) => {
+      if (cancelled) return;
+      setProgress(event);
+    });
+
     instance
       .init()
       .then((resolvedDevice) => {
@@ -82,9 +97,10 @@ export function useSamEngine(createClient?: () => SamWorkerClient): UseSamEngine
 
     return () => {
       cancelled = true;
+      unsubscribeProgress();
       instance.terminate();
     };
   }, [clientFactory]);
 
-  return { status, device, error, client };
+  return { status, device, error, client, progress };
 }
