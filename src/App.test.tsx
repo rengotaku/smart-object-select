@@ -1,43 +1,25 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, it, expect } from "vitest";
+import { render, screen } from "@testing-library/react";
+import { describe, it, expect, beforeEach } from "vitest";
 import App from "./App";
 
 describe("App", () => {
-  it("renders home page by default", () => {
-    render(<App />);
-    expect(screen.getByText("React SPA Boilerplate")).toBeInTheDocument();
+  beforeEach(() => {
+    window.history.pushState({}, "", "/");
   });
 
-  it("navigates to users page", async () => {
-    const user = userEvent.setup();
+  it("redirects the root path to the segment page", () => {
     render(<App />);
-
-    await user.click(screen.getAllByRole("link", { name: "Users" })[0]);
-
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Users" })).toBeInTheDocument();
-    });
+    expect(screen.getByRole("heading", { name: "Segment" })).toBeInTheDocument();
   });
 
-  it("navigates back to home page", async () => {
-    const user = userEvent.setup();
+  it("renders the app title in the header", () => {
     render(<App />);
-
-    await user.click(screen.getAllByRole("link", { name: "Users" })[0]);
-    await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Users" })).toBeInTheDocument();
-    });
-
-    await user.click(screen.getByRole("link", { name: "Home" }));
-    await waitFor(() => {
-      expect(screen.getByText("React SPA Boilerplate")).toBeInTheDocument();
-    });
+    expect(screen.getByText("Smart Object Select")).toBeInTheDocument();
   });
 
-  it("shows navigation links", () => {
+  it("renders a 404 page for unknown routes", () => {
+    window.history.pushState({}, "", "/unknown");
     render(<App />);
-    expect(screen.getByRole("link", { name: "Home" })).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Users" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("404")).toBeInTheDocument();
   });
 });

@@ -7,7 +7,7 @@
 Photoshop の「オブジェクト選択ツール」相当をブラウザだけで実現する React SPA。画像をアップロードして任意の位置をクリックすると、その位置のオブジェクトが SAM（Segment Anything Model、実際には軽量蒸留版の SlimSAM）で自動的にマスク選択され、PNG 透過切り抜き等で書き出せる。
 
 - **バックエンドが無い**。推論・画像処理はすべてブラウザ内で完結する（サーバーへ画像もクリック座標も送らない）
-- `my-boilerplate` の `react-spa` テンプレートから scaffold されている。`src/pages/HomePage.tsx` / `LoginPage.tsx` / `UsersPage.tsx` と `src/hooks/useUsers.ts` / `useAuthStore.ts`、`src/test/mocks/` はテンプレート付属のサンプル（ユーザー一覧・ログイン）であり、SAM 機能とは無関係。**この機能のエントリポイントは `/segment` ルート**（`src/App.tsx` の `<Route path="segment" element={<SegmentPage />} />`）
+- `my-boilerplate` の `react-spa` テンプレートから scaffold されている。テンプレート付属のサンプル（`HomePage`/`LoginPage`/`UsersPage` とその依存一式の認証・ユーザー一覧デモ機能）は削除済みで、アプリは `/segment` 単一構成（issue [#30](https://github.com/rengotaku/smart-object-select/issues/30)）。**この機能のエントリポイントは `/segment` ルート**（`src/App.tsx` の `<Route path="segment" element={<SegmentPage />} />`、`/` はそこへ redirect する）
 - モデル（`Xenova/slimsam-77-uniform`、`src/lib/sam/constants.ts` の `SAM_MODEL_ID`、Apache-2.0）と推論ランタイムの WASM（onnxruntime-web、MIT）は `public/models/slimsam-77-uniform/` / `public/onnxruntime/` に自前ホスティングしている。`transformersLoader.ts` が `env.allowRemoteModels = false` 等を設定しており、初回アクセス以降 Hugging Face Hub / jsDelivr など外部サービスへは一切依存しない（`docs/adr/0005-offline-first-model-delivery.md`）
 - Service Worker（`public/sw.js`）がモデルアセットとアプリ本体を Cache Storage に事前キャッシュしており、2回目以降はオフラインでも `/segment` が動作する（§3・§7）
 - 初回モデルロード中はファイル単位のダウンロード進捗を Worker → メインスレッドの通知チャネル（既存の id 相関 request/response とは別経路、§4）で `SegmentPage` に表示する
