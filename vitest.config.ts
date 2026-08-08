@@ -21,10 +21,6 @@ export default defineConfig({
         "src/test/**",
         "src/main.tsx",
         "src/vite-env.d.ts",
-        // shared-react-ui primitive: shipped to every template via compose
-        // even when not referenced by app code. Coverage is enforced via
-        // shared-react-ui's gallery, not via per-template integration.
-        "src/components/ui/time-picker.tsx",
         // Web Worker entry point: only wires self.onmessage to the handler.
         // Cannot be exercised in jsdom (no real Worker runtime); the routed
         // logic (samWorkerHandler.ts) is unit-tested directly instead.
