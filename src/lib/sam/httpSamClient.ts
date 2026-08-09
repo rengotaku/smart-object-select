@@ -1,16 +1,16 @@
+import type { SamModelDescriptor } from "./constants";
 import type { SamDevice } from "./device";
 import { SamNoImageError } from "./samSession";
 import type { SamWorkerClient } from "./samWorkerClient";
 import type { SamImageInput, SamMaskResult, SegmentPoint } from "./types";
 
 /**
- * `GET /models` のレスポンス1件（`server/src/modelRegistry.ts` の `ModelDescriptor` と対応）。
- * `server/` には依存できないため、ワイヤーフォーマットとして同形の型をここに独立定義する。
+ * `GET /models` のレスポンス1件は `server/src/modelRegistry.ts` の `ModelDescriptor` と
+ * 対応する。`server/` には依存できないが、フロント側の `constants.ts` が定義している
+ * `SamModelDescriptor`（id/name）と同形のワイヤーフォーマットのため、独自定義せず再利用する
+ * （issue #34 で `constants.ts` に追加された型。#33 実装時点では未反映だったため重複定義に
+ * なっていたのを rebase 後に統合した）。
  */
-export interface SamModelDescriptor {
-  id: string;
-  name: string;
-}
 
 interface HealthResponse {
   status: string;
