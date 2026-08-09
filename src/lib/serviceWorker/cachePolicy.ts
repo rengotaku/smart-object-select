@@ -82,6 +82,26 @@ export function buildModelAssetPaths(modelId: string): string[] {
 }
 
 /**
+ * `public/models/` 配下に自前ホスティングしているモデル ID の一覧。
+ * Service Worker の install 時 precache 対象を決めるための一覧であり、
+ * どのモデルを UI から選択可能にするか（`src/lib/sam/constants.ts`）とは別の関心事
+ * として独立させている（`public/sw.js` は TypeScript を import できないため）。
+ * 新しいモデルを `public/models/<modelId>/` へ追加したら、この配列にも追記すること。
+ * `public/sw.js` 側と同じ値を保つこと。
+ */
+export const SELF_HOSTED_MODEL_IDS = [
+  "slimsam-77-uniform",
+  "slimsam-50-uniform",
+] as const;
+
+/**
+ * `SELF_HOSTED_MODEL_IDS` に列挙した全モデルの precache 対象パス一覧を生成する。
+ */
+export function buildAllModelAssetPaths(): string[] {
+  return SELF_HOSTED_MODEL_IDS.flatMap((modelId) => buildModelAssetPaths(modelId));
+}
+
+/**
  * onnxruntime-web の WASM ランタイム一式（Safari 版・非 Safari(asyncify) 版の両方）。
  * `src/lib/sam/wasmRuntimePaths.ts` の `resolveSelfHostedWasmPaths` は実行時の UA で
  * どちらか一方のみを選択するが、install 時点ではクライアントの UA を確定できない

@@ -20,8 +20,10 @@
  * ため、install 時にメインバンドルのソースを走査して Worker チャンク URL を抽出し、
  * 事前キャッシュ対象に加えている（`extractWorkerChunkUrls` 参照）。
  *
- * モデルアセット本体（`/models/<SAM_MODEL_ID>/**`）と onnxruntime-web の WASM
- * ランタイム（`/onnxruntime/**`）はビルドハッシュを含まない固定パスのため、
+ * モデルアセット本体（`MODEL_IDS` 各要素の `/models/<modelId>/**`。自前ホスティング済みの
+ * 全モデルを対象とし、UI から選択可能な既定モデル [`src/lib/sam/constants.ts` の
+ * `SAM_MODEL_ID`] とは独立に precache する）と onnxruntime-web の WASM ランタイム
+ * （`/onnxruntime/**`）はビルドハッシュを含まない固定パスのため、
  * install 時に固定リストで明示的に事前キャッシュしている（`precacheModelAssets` 参照）。
  *
  * `public/` 配下は Vite の変換・バンドル対象外のため、このファイルは TypeScript を
@@ -36,12 +38,16 @@
 // src/lib/serviceWorker/cachePolicy.ts の CACHE_NAME_PREFIX と同じ値を保つこと。
 const CACHE_NAME_PREFIX = "smart-object-select-model-assets";
 
-// public/models/<MODEL_ID>/ を指す。src/lib/sam/constants.ts の SAM_MODEL_ID と同じ値。
-const MODEL_ID = "slimsam-77-uniform";
+// public/models/<modelId>/ を指す。src/lib/serviceWorker/cachePolicy.ts の
+// SELF_HOSTED_MODEL_IDS と同じ値を保つこと（既定選択モデルは
+// src/lib/sam/constants.ts の SAM_MODEL_ID = "slimsam-77-uniform" のまま変更していない。
+// ここは「self-host 済みで precache すべきモデル一覧」であり選択中モデルとは別の関心事）。
+const MODEL_IDS = ["slimsam-77-uniform", "slimsam-50-uniform"];
 
 // モデルアセット・アプリ本体が更新されたらこの値を上げる。activate イベントで
 // このバージョンと異なる（かつ CACHE_NAME_PREFIX を持つ）旧キャッシュを破棄する。
-const CACHE_VERSION = "v1";
+// slimsam-50-uniform 追加に伴い v1 -> v2 に更新（新モデル資産を確実に precache するため）。
+const CACHE_VERSION = "v2";
 
 // src/lib/serviceWorker/cachePolicy.ts の CACHEABLE_ASSET_PATH_PREFIXES と同じ値を保つこと。
 const CACHEABLE_ASSET_PATH_PREFIXES = ["/models/", "/onnxruntime/"];
@@ -64,7 +70,10 @@ function buildCacheName(id, version) {
   return `${CACHE_NAME_PREFIX}-${id}-${version}`;
 }
 
-const MODEL_CACHE_NAME = buildCacheName(MODEL_ID, CACHE_VERSION);
+// 複数モデルのアセットを1つのキャッシュにまとめて保持するため、特定モデルの ID ではなく
+// 固定の集約名 "models" でキャッシュ名を生成する（`MODEL_IDS` 追加時にキャッシュ名自体は
+// 変わらないようにするため。バージョン更新時の破棄は CACHE_VERSION で行う）。
+const MODEL_CACHE_NAME = buildCacheName("models", CACHE_VERSION);
 const APP_SHELL_CACHE_NAME = buildCacheName("app-shell", CACHE_VERSION);
 const CURRENT_CACHE_NAMES = new Set([MODEL_CACHE_NAME, APP_SHELL_CACHE_NAME]);
 
@@ -204,9 +213,9 @@ async function precacheAppShell(cache) {
 }
 
 /**
- * モデルアセット本体（`/models/<MODEL_ID>/**`）と onnxruntime-web の WASM ランタイム
- * （`/onnxruntime/**`。Safari 版・非 Safari(asyncify) 版の両方）を、install 時点で
- * MODEL_CACHE_NAME へ明示的に事前キャッシュする。これらのパスはビルドハッシュを
+ * モデルアセット本体（`MODEL_IDS` それぞれの `/models/<modelId>/**`）と onnxruntime-web の
+ * WASM ランタイム（`/onnxruntime/**`。Safari 版・非 Safari(asyncify) 版の両方）を、
+ * install 時点で MODEL_CACHE_NAME へ明示的に事前キャッシュする。これらのパスはビルドハッシュを
  * 含まないため固定リストで参照できる（`buildModelAssetPaths` / `WASM_RUNTIME_ASSET_PATHS`）。
  *
  * 個々の URL の取得は `cacheFirst`（fetch handler が実リクエストの処理にも使う関数）を
@@ -224,7 +233,10 @@ async function precacheAppShell(cache) {
  * （`cacheFirst` 内のコメント参照）。
  */
 async function precacheModelAssets(cacheName) {
-  const urls = [...buildModelAssetPaths(MODEL_ID), ...WASM_RUNTIME_ASSET_PATHS];
+  const urls = [
+    ...MODEL_IDS.flatMap((modelId) => buildModelAssetPaths(modelId)),
+    ...WASM_RUNTIME_ASSET_PATHS,
+  ];
   await Promise.all(
     urls.map((url) =>
       cacheFirst(new Request(url), cacheName).catch((error) => {
