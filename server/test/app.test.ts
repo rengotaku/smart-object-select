@@ -325,4 +325,37 @@ describe("createServerApp（codex レビュー指摘対応: 複数モデル対�
 
     expect(res.status).toBe(200);
   });
+
+  it("追加: wt dev のオリジン（<worktree>.<repo>.wt.localhost:<port>）からのリクエストを許可する", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    const res = await request(app)
+      .get("/health")
+      .set("Origin", "http://main.smart-object-select.wt.localhost:8088");
+
+    expect(res.headers["access-control-allow-origin"]).toBe(
+      "http://main.smart-object-select.wt.localhost:8088"
+    );
+  });
+
+  it("追加: wt.localhost に似た別ホストは許可しない（サフィックス一致の悪用防止）", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    const res = await request(app)
+      .get("/health")
+      .set("Origin", "http://evil.com/notwt.localhost");
+
+    expect(res.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("追加: 既定の許可オリジン（http://localhost:5173）からのリクエストは引き続き許可する", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    const res = await request(app).get("/health").set("Origin", "http://localhost:5173");
+
+    expect(res.headers["access-control-allow-origin"]).toBe("http://localhost:5173");
+  });
 });
