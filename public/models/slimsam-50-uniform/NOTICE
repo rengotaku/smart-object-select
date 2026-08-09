@@ -27,4 +27,6 @@ Notes:
     existing speed-oriented default (docs/adr/0005-offline-first-model-delivery.md).
 
 This NOTICE is provided pursuant to Section 4(d) of the Apache License, Version 2.0.
-A copy of the license can be obtained at https://www.apache.org/licenses/LICENSE-2.0.
+A copy of the license is included in this repository at
+public/models/LICENSE-APACHE-2.0.txt (Section 4(a) requirement), and can also be
+obtained at https://www.apache.org/licenses/LICENSE-2.0.

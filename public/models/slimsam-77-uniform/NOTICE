@@ -21,4 +21,6 @@ Changes made:
     from its own origin instead of fetching it from the Hugging Face Hub at runtime.
 
 This NOTICE is provided pursuant to Section 4(d) of the Apache License, Version 2.0.
-A copy of the license can be obtained at https://www.apache.org/licenses/LICENSE-2.0.
+A copy of the license is included in this repository at
+public/models/LICENSE-APACHE-2.0.txt (Section 4(a) requirement), and can also be
+obtained at https://www.apache.org/licenses/LICENSE-2.0.
