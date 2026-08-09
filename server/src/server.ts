@@ -17,7 +17,6 @@ export function resolvePort(): number {
 /** `app.listen` をループバック固定で呼び出す薄いラッパー。テストから DI したい部分のみ切り出す。 */
 export function startServer(app: Application, port: number): ReturnType<Application["listen"]> {
   return app.listen(port, LOOPBACK_HOST, () => {
-    // eslint-disable-next-line no-console
     console.log(
       `[server] smart-object-select inference server listening on http://${LOOPBACK_HOST}:${port}`
     );

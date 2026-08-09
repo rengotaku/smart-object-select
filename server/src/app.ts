@@ -83,6 +83,9 @@ export function createServerApp(
     })
   );
 
+  // Express はエラーハンドラミドルウェアを引数の個数（4個）で判定するため、
+  // 使わない req/next も省略できない。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
     if (err instanceof RequestValidationError || err instanceof SamEmptyPointsError) {
       res.status(400).json({ error: err.message });
@@ -93,8 +96,6 @@ export function createServerApp(
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
-    // eslint 等が無い server/ でも最低限のエラー可視性は確保する
-    // eslint-disable-next-line no-console
     console.error("[server] unhandled error:", err);
     res.status(500).json({ error: message });
   });
