@@ -84,10 +84,18 @@ function decodeMask(mask: WireMaskResult): SamMaskResult {
  * - `terminate()`: `DELETE /sessions/:id`（セッションを保持していれば、ベストエフォート）
  * - `onProgress()`: サーバー方式では進捗通知が無いため no-op
  */
+/**
+ * サーバーURL末尾のスラッシュ（複数連続含む）を除去する。除去しないと `${baseUrl}${path}`
+ * が `//health` のようになり Express のルートと一致せず接続に失敗する
+ * （codex レビュー指摘対応）。`createHttpSamClient` 内部だけでなく、クライアント生成前に
+ * モデル一覧を取得する `SegmentPage.tsx` 側の fetch でも同じ正規化が必要なため export する。
+ */
+export function normalizeServerBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/+$/, "");
+}
+
 export function createHttpSamClient(baseUrl: string, modelId: string): SamWorkerClient {
-  // 末尾スラッシュを正規化する。除去しないと `${baseUrl}${path}` が `//health` のように
-  // なり Express のルートと一致せず接続に失敗する（codex レビュー指摘対応）。
-  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
+  const normalizedBaseUrl = normalizeServerBaseUrl(baseUrl);
   let sessionId: string | null = null;
   // setImage() の並行呼び出しを世代で判別する（samSession.ts の generation ガードと同じ
   // 考え方）。POST /sessions のレスポンス到達順がリクエスト順と一致するとは限らないため、
@@ -220,6 +228,12 @@ export function createHttpSamClient(baseUrl: string, modelId: string): SamWorker
     },
 
     terminate(): void {
+      // setImage() が POST /sessions の応答待ちの間に terminate() が呼ばれると、
+      // 当時は sessionId がまだ null なのでここでは何もできない。generation を進めて
+      // おくことで、後から届く setImage() のレスポンスを stale として検知させ、
+      // サーバー上に作られたセッションを破棄させる（codex レビュー指摘対応）。
+      generation += 1;
+
       if (!sessionId) {
         return;
       }

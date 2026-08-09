@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSamEngine, useSegmentation } from "@/hooks";
 import { cn } from "@/lib/utils";
+import { normalizeServerBaseUrl } from "@/lib/sam";
 import type { ExecutionMode, SamModelDescriptor, SamWorkerClient } from "@/lib/sam";
 
 /** ローカル推論サーバー（issue #32、`server/`）の既定ポート（`server/README.md` 参照）。 */
@@ -62,7 +63,7 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
         if (cancelled) return undefined;
         setServerModelsLoading(true);
         setServerModelsError(null);
-        return fetch(`${serverUrl}/models`);
+        return fetch(`${normalizeServerBaseUrl(serverUrl)}/models`);
       })
       .then((response) => {
         if (cancelled || !response) return undefined;

@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { createHttpSamClient, MAX_IMAGE_PIXELS_FOR_LOCAL_SERVER } from "./httpSamClient";
+import {
+  createHttpSamClient,
+  normalizeServerBaseUrl,
+  MAX_IMAGE_PIXELS_FOR_LOCAL_SERVER,
+} from "./httpSamClient";
 
 const BASE_URL = "http://localhost:8787";
 const MODEL_ID = "slimsam-77-uniform";
@@ -462,5 +466,65 @@ describe("createHttpSamClient", () => {
       `${BASE_URL}/sessions/session-b/segment`,
       expect.anything()
     );
+  });
+
+  it("修正3(round3): setImage が応答待ちの間に terminate() が呼ばれたら、後から届くセッションを破棄する", async () => {
+    // terminate() 呼び出し時点では POST /sessions がまだ応答しておらず sessionId が
+    // null のため、terminate() 自身は DELETE を送れない。generation を進めておくことで、
+    // 遅れて届く setImage() のレスポンスを stale として検知し、そのセッションを
+    // ベストエフォートで破棄できることを確認する（codex レビュー round3 指摘対応）。
+    const deferredCreate = createDeferred<Response>();
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href === `${BASE_URL}/sessions` && init?.method === "POST") {
+        return deferredCreate.promise;
+      }
+      if (href === `${BASE_URL}/sessions/session-late` && init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`unexpected fetch: ${href} ${init?.method ?? "GET"}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHttpSamClient(BASE_URL, MODEL_ID);
+
+    const setImagePromise = client.setImage({
+      data: new Uint8ClampedArray(4),
+      width: 1,
+      height: 1,
+    });
+
+    // POST /sessions がまだ未応答のうちに terminate() が呼ばれる（実行方式切り替え・
+    // アンマウント等を想定）。この時点では sessionId が null のため何もできない。
+    client.terminate();
+
+    // その後 POST /sessions の応答が遅れて届く
+    deferredCreate.resolve(jsonResponse({ sessionId: "session-late" }));
+    await setImagePromise;
+
+    const deleteCall = fetchMock.mock.calls.find(
+      (call) =>
+        String(call[0]) === `${BASE_URL}/sessions/session-late` &&
+        (call[1] as RequestInit | undefined)?.method === "DELETE"
+    );
+    expect(deleteCall).toBeDefined();
+  });
+});
+
+describe("normalizeServerBaseUrl", () => {
+  it("末尾のスラッシュを除去する", () => {
+    expect(normalizeServerBaseUrl("http://localhost:8787/")).toBe(
+      "http://localhost:8787"
+    );
+  });
+
+  it("複数の末尾スラッシュも除去する", () => {
+    expect(normalizeServerBaseUrl("http://localhost:8787///")).toBe(
+      "http://localhost:8787"
+    );
+  });
+
+  it("末尾スラッシュが無ければそのまま返す", () => {
+    expect(normalizeServerBaseUrl("http://localhost:8787")).toBe("http://localhost:8787");
   });
 });
