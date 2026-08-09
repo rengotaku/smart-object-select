@@ -21,7 +21,23 @@ npm run dev       # ファイル変更を検知して再起動
 
 既定ポートは `8787`。`SERVER_PORT` 環境変数で変更できる。
 CORS の許可オリジンは既定で `http://localhost:5173`（Vite dev server）。
-`SERVER_CORS_ORIGINS`（カンマ区切り）で追加できる。
+`SERVER_CORS_ORIGINS`（カンマ区切り）で追加できる。CORS は `*.wt.localhost` オリジンも自動許可する
+（`wt dev` 環境向け、`src/app.ts` の `WT_DEV_ORIGIN_PATTERN` 参照）。
+
+## wt dev での自動起動
+
+`wt dev`（`~/.config/wt/wt serve`）配下では `server` service として登録済みで、`web`
+service（フロントエンド）と一緒に自動起動・自動停止する。手動で `npm start` する必要はない。
+
+- サービス定義はリポジトリにコミット済みの `.wt/dev.toml` にある。`wt tree add` で
+  worktree を作るだけで有効になり、リポジトリ外の手動設定は不要。
+- 割り当てポートは起動のたびに変わる（`SERVER_PORT=${port}` で起動）。フロントエンドの
+  サーバーURL既定値には `web` 起動時に注入される `VITE_SERVER_URL` 経由で自動反映される
+  （`src/pages/SegmentPage.tsx` 参照）。
+- 登録状態の確認: `cd ~/code/smart-object-select && ~/.config/wt/wt dev show --json`
+- `wt dev` を使わず素の `npm run dev`（ルート）でフロントエンドだけ起動する場合は、
+  上記「起動」セクションの手順で `server/` を別途手動起動すること（既定ポート `8787`
+  にフォールバックする）。
 
 ## テスト
 
