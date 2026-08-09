@@ -15,12 +15,25 @@ import type { SamRuntime } from "../../src/lib/sam/samSession";
 /** SPA の開発オリジン。本番オリジンは runtime env で拡張できるようにする。 */
 const DEFAULT_ALLOWED_ORIGINS = ["http://localhost:5173"];
 
+/**
+ * `wt dev`（git worktree ごとに `<worktree名>.<repo名>.wt.localhost:<port>` で
+ * ローカル配信するツール。`~/.config/wt/wt serve`）経由でアクセスした場合の
+ * オリジンパターン。開発機ではポートが起動のたびに変わりうるため、固定リストでは
+ * 追従できず `SERVER_CORS_ORIGINS` の手動指定を毎回強いることになる。ホスト名の
+ * サフィックスだけを検証する（他ホストへの誤許可を避けるため `wt.localhost` 固定）。
+ */
+const WT_DEV_ORIGIN_PATTERN = /^https?:\/\/[a-z0-9-]+\.[a-z0-9-]+\.wt\.localhost(:\d+)?$/;
+
 function resolveAllowedOrigins(): string[] {
   const extra = process.env.SERVER_CORS_ORIGINS;
   if (!extra) {
     return DEFAULT_ALLOWED_ORIGINS;
   }
   return [...DEFAULT_ALLOWED_ORIGINS, ...extra.split(",").map((origin) => origin.trim())];
+}
+
+function isAllowedOrigin(origin: string, allowedOrigins: string[]): boolean {
+  return allowedOrigins.includes(origin) || WT_DEV_ORIGIN_PATTERN.test(origin);
 }
 
 function asyncHandler(
@@ -55,7 +68,20 @@ export function createServerApp(
     ? Array.from(modelRuntimes.keys())
     : AVAILABLE_MODELS.map((model) => model.id);
 
-  app.use(cors({ origin: resolveAllowedOrigins() }));
+  const allowedOrigins = resolveAllowedOrigins();
+  app.use(
+    cors({
+      origin(origin, callback) {
+        // Origin ヘッダが無いリクエスト（curl 等、ブラウザ以外からの直接アクセス）は許可する
+        // （元の `origin: string[]` 指定時と同じ挙動を維持）。
+        if (!origin || isAllowedOrigin(origin, allowedOrigins)) {
+          callback(null, true);
+          return;
+        }
+        callback(null, false);
+      },
+    })
+  );
   app.use(express.json({ limit: "50mb" }));
 
   app.get("/health", (_req, res) => {
