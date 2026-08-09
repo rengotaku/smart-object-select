@@ -95,6 +95,30 @@ export function decodeImagePayload(body: unknown): SamImageInput {
   };
 }
 
+/**
+ * `POST /sessions` の任意フィールド `modelId` を検証する。省略時は `undefined`
+ * （呼び出し元 `sessionStore.create` が既定 runtime にフォールバックする）。
+ *
+ * `availableModelIds` に無い値を指定された場合は 400 を返す（codex レビュー指摘対応:
+ * 未知の modelId をサイレントに既定モデルへフォールバックさせず、明示的にエラーにする）。
+ */
+export function decodeModelId(body: unknown, availableModelIds: readonly string[]): string | undefined {
+  if (typeof body !== "object" || body === null) {
+    throw new RequestValidationError("request body must be a JSON object");
+  }
+  const raw = (body as Record<string, unknown>).modelId;
+  if (raw === undefined) {
+    return undefined;
+  }
+  if (typeof raw !== "string") {
+    throw new RequestValidationError('field "modelId" must be a string');
+  }
+  if (!availableModelIds.includes(raw)) {
+    throw new RequestValidationError(`unknown modelId: "${raw}"`);
+  }
+  return raw;
+}
+
 export function decodePointsPayload(body: unknown): SegmentPoint[] {
   if (typeof body !== "object" || body === null) {
     throw new RequestValidationError("request body must be a JSON object");

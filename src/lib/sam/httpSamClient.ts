@@ -77,7 +77,9 @@ function decodeMask(mask: WireMaskResult): SamMaskResult {
  * - `init()`: `GET /health` → `GET /models`（疎通確認とモデル一覧取得。戻り値の `SamDevice` は
  *   local-server 方式では意味を持たないプレースホルダで、呼び出し側（`useSamEngine`/
  *   `SegmentPage`）は `executionMode` で分岐しこの値を表示には使わない）
- * - `setImage()`: `POST /sessions` でセッションを作成し `sessionId` を内部に保持する
+ * - `setImage()`: `POST /sessions` に `modelId` を含めてセッションを作成し `sessionId` を
+ *   内部に保持する（サーバー側は指定された `modelId` に対応する `SamRuntime` で推論する。
+ *   codex レビュー指摘対応: 選択したモデルが実際に使われることをサーバー側と揃えて保証する）
  * - `segment()`/`segmentAtPoints()`: `POST /sessions/:id/segment`
  * - `terminate()`: `DELETE /sessions/:id`（セッションを保持していれば、ベストエフォート）
  * - `onProgress()`: サーバー方式では進捗通知が無いため no-op
@@ -87,6 +89,11 @@ export function createHttpSamClient(baseUrl: string, modelId: string): SamWorker
   // なり Express のルートと一致せず接続に失敗する（codex レビュー指摘対応）。
   const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
   let sessionId: string | null = null;
+  // setImage() の並行呼び出しを世代で判別する（samSession.ts の generation ガードと同じ
+  // 考え方）。POST /sessions のレスポンス到達順がリクエスト順と一致するとは限らないため、
+  // 「自分より新しい setImage() が既に呼ばれているか」を見て古いレスポンスの sessionId
+  // 上書きを防ぐ（codex レビュー指摘対応: 並行 setImage の完了順でセッションを上書きしない）。
+  let generation = 0;
 
   /**
    * DELETE はレスポンスボディを持たない（204 No Content）ため、`response.json()` を呼ぶ
@@ -165,6 +172,8 @@ export function createHttpSamClient(baseUrl: string, modelId: string): SamWorker
         );
       }
 
+      const myGeneration = ++generation;
+
       // 別画像に切り替える際は、サーバー上に前回の embedding を残さないよう先に破棄する
       // （codex レビュー指摘対応: 破棄せずに作り続けると TTL まで蓄積しメモリを圧迫する）。
       if (sessionId) {
@@ -182,8 +191,18 @@ export function createHttpSamClient(baseUrl: string, modelId: string): SamWorker
             width: image.width,
             height: image.height,
           },
+          modelId,
         }),
       });
+
+      if (myGeneration !== generation) {
+        // 自分より新しい setImage() が既に呼ばれた後にこのレスポンスが届いた（並行呼び出し
+        // で応答順がリクエスト順と一致しなかった）。内部状態は上書きせず、サーバー上に
+        // 作られてしまったこのセッションだけベストエフォートで破棄する。
+        void disposeSession(response.sessionId);
+        return;
+      }
+
       sessionId = response.sessionId;
     },
 

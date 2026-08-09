@@ -54,8 +54,12 @@ interface SessionEntry {
 }
 
 export interface SessionStore {
-  /** `createSamSession(runtime, device)` → `setImage(image)` → セッションIDを発行し保持する */
-  create(image: SamImageInput): Promise<string>;
+  /**
+   * `createSamSession(runtime, device)` → `setImage(image)` → セッションIDを発行し保持する。
+   * `modelId` を省略、または `createSessionStore` の第三引数 `modelRuntimes` に対応する
+   * runtime が無い場合は、既定の `runtime`（第一引数）にフォールバックする（後方互換）。
+   */
+  create(image: SamImageInput, modelId?: string): Promise<string>;
   get(sessionId: string): SamSession;
   dispose(sessionId: string): void;
   /**
@@ -67,9 +71,15 @@ export interface SessionStore {
   stopSweeping(): void;
 }
 
+/**
+ * `modelRuntimes` は `modelId` ごとの `SamRuntime`（issue #33 コメント「複数モデル対応」）。
+ * 省略時は常に `runtime`（第一引数、既定モデル）だけを使う既存動作のまま
+ * （後方互換。既存の Case 1〜7・TTL/バリデーションテストは1文字も変更していない）。
+ */
 export function createSessionStore(
   runtime: SamRuntime,
-  options: SessionStoreOptions = {}
+  options: SessionStoreOptions = {},
+  modelRuntimes?: Map<string, SamRuntime>
 ): SessionStore {
   const ttlMs = options.ttlMs ?? resolvePositiveIntEnv("SESSION_TTL_MS", DEFAULT_SESSION_TTL_MS);
   const sweepIntervalMs = options.sweepIntervalMs ?? DEFAULT_SWEEP_INTERVAL_MS;
@@ -101,14 +111,22 @@ export function createSessionStore(
   }
 
   return {
-    async create(image) {
+    async create(image, modelId) {
       // 期限切れセッションが溜まっていれば作成前にも掃除しておく（バックグラウンドタイマー
       // が無効化されているテスト等でも、アクセスの都度整合性を保てるようにする）。
       sweepExpiredSessions();
 
+      // modelId が指定され、かつ対応する runtime が modelRuntimes にあればそれを使う。
+      // 未指定・未対応（＝呼び出し元 app.ts で検証済みのはずだが、保険として）は
+      // 既定の runtime にフォールバックする。
+      const resolvedRuntime =
+        modelId !== undefined && modelRuntimes?.has(modelId)
+          ? modelRuntimes.get(modelId)!
+          : runtime;
+
       // Node (onnxruntime-node) は wasm/webgpu を区別しないため device は無視される
       // 前提のダミー値（nodeTransformersLoader.ts 参照）。
-      const session = await createSamSession(runtime, "wasm");
+      const session = await createSamSession(resolvedRuntime, "wasm");
       await session.setImage(image);
 
       const sessionId = randomUUID();

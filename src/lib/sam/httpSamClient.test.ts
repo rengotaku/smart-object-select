@@ -11,6 +11,14 @@ function jsonResponse(body: unknown, status = 200): Response {
   });
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
 });
@@ -366,5 +374,93 @@ describe("createHttpSamClient", () => {
     await expect(
       client.setImage({ data: new Uint8ClampedArray(4), width: 100, height: 100 })
     ).resolves.toBeUndefined();
+  });
+
+  // --- codex 再レビュー指摘（修正1: modelId 送信・修正2: 並行 setImage 競合）対応テスト ---
+
+  it("修正1(フロント): POST /sessions のリクエストボディに modelId を含める", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href === `${BASE_URL}/sessions` && init?.method === "POST") {
+        return jsonResponse({ sessionId: "session-1" });
+      }
+      throw new Error(`unexpected fetch: ${href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHttpSamClient(BASE_URL, MODEL_ID);
+    await client.setImage({
+      data: new Uint8ClampedArray([1, 2, 3, 4]),
+      width: 1,
+      height: 1,
+    });
+
+    const sessionCall = fetchMock.mock.calls.find(
+      (call) => String(call[0]) === `${BASE_URL}/sessions`
+    );
+    expect(sessionCall).toBeDefined();
+    const requestInit = sessionCall?.[1] as RequestInit;
+    const requestBody = JSON.parse(String(requestInit.body)) as { modelId?: string };
+    expect(requestBody.modelId).toBe(MODEL_ID);
+  });
+
+  it("修正2: 並行する setImage の完了順でセッションを上書きしない（後発呼び出しが先に応答するケース）", async () => {
+    const deferredA = createDeferred<Response>();
+    const deferredB = createDeferred<Response>();
+
+    const fetchMock = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+      const href = String(url);
+      if (href === `${BASE_URL}/sessions` && init?.method === "POST") {
+        const body = JSON.parse(String(init.body)) as { image: { width: number } };
+        if (body.image.width === 100) return deferredA.promise;
+        if (body.image.width === 200) return deferredB.promise;
+        throw new Error(`unexpected POST /sessions body: ${String(init.body)}`);
+      }
+      if (href === `${BASE_URL}/sessions/session-a` && init?.method === "DELETE") {
+        return new Response(null, { status: 204 });
+      }
+      if (href === `${BASE_URL}/sessions/session-b/segment` && init?.method === "POST") {
+        return jsonResponse({ masks: [] });
+      }
+      throw new Error(`unexpected fetch: ${href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createHttpSamClient(BASE_URL, MODEL_ID);
+
+    // A（先発、画像A）と B（後発、画像B。ユーザーがすぐ画像を切り替えた想定）を並行に呼ぶ
+    const callA = client.setImage({
+      data: new Uint8ClampedArray(4),
+      width: 100,
+      height: 1,
+    });
+    const callB = client.setImage({
+      data: new Uint8ClampedArray(4),
+      width: 200,
+      height: 1,
+    });
+
+    // 後発の B が先に応答する
+    deferredB.resolve(jsonResponse({ sessionId: "session-b" }));
+    await callB;
+
+    // 先発の A が後から応答する（古いレスポンス）
+    deferredA.resolve(jsonResponse({ sessionId: "session-a" }));
+    await callA;
+
+    // 古い方（A）のレスポンスでセッションが上書きされず、サーバー上のセッションも破棄される
+    const deleteCall = fetchMock.mock.calls.find(
+      (call) =>
+        String(call[0]) === `${BASE_URL}/sessions/session-a` &&
+        (call[1] as RequestInit | undefined)?.method === "DELETE"
+    );
+    expect(deleteCall).toBeDefined();
+
+    // 内部状態は最新（B）のセッションのままなので、segmentAtPoints は session-b 宛に送られる
+    await client.segmentAtPoints([{ x: 1, y: 1, label: 1 }]);
+    expect(fetchMock).toHaveBeenCalledWith(
+      `${BASE_URL}/sessions/session-b/segment`,
+      expect.anything()
+    );
   });
 });

@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { decodeImagePayload, MAX_IMAGE_DIMENSION_PX, RequestValidationError } from "../src/wireFormat";
+import {
+  decodeImagePayload,
+  decodeModelId,
+  MAX_IMAGE_DIMENSION_PX,
+  RequestValidationError,
+} from "../src/wireFormat";
 
 function base64OfLength(byteLength: number): string {
   return Buffer.from(new Uint8Array(byteLength)).toString("base64");
@@ -49,5 +54,36 @@ describe("decodeImagePayload バリデーション", () => {
     expect(result.width).toBe(2);
     expect(result.height).toBe(2);
     expect(result.data.byteLength).toBe(16);
+  });
+});
+
+// 検知/理由: codex レビュー指摘（未知の modelId をサイレントに既定モデルへフォールバック
+// させると、選択したモデルと実際に推論に使われるモデルが不整合になる）への対応を
+// ユニットレベルで検証する。
+describe("decodeModelId バリデーション", () => {
+  const AVAILABLE_MODEL_IDS = ["model-a", "model-b"];
+
+  it("追加: modelId が未指定なら undefined を返す", () => {
+    expect(decodeModelId({}, AVAILABLE_MODEL_IDS)).toBeUndefined();
+  });
+
+  it("追加: 利用可能な modelId ならそのまま返す", () => {
+    expect(decodeModelId({ modelId: "model-b" }, AVAILABLE_MODEL_IDS)).toBe("model-b");
+  });
+
+  it("追加: 利用可能な一覧に無い modelId は RequestValidationError になる", () => {
+    expect(() => decodeModelId({ modelId: "unknown-model" }, AVAILABLE_MODEL_IDS)).toThrow(
+      RequestValidationError
+    );
+  });
+
+  it("追加: modelId が文字列でない場合は RequestValidationError になる", () => {
+    expect(() => decodeModelId({ modelId: 123 }, AVAILABLE_MODEL_IDS)).toThrow(
+      RequestValidationError
+    );
+  });
+
+  it("追加: body がオブジェクトでない場合は RequestValidationError になる", () => {
+    expect(() => decodeModelId(null, AVAILABLE_MODEL_IDS)).toThrow(RequestValidationError);
   });
 });
