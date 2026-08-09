@@ -1,0 +1,29 @@
+{
+  "name": "smart-object-select-server",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Local inference server for smart-object-select. Runs SAM (SlimSAM) segmentation via onnxruntime-node so the SPA can offload inference to a native process instead of the browser.",
+  "scripts": {
+    "start": "tsx src/server.ts",
+    "dev": "tsx watch src/server.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^4.2.0",
+    "cors": "^2.8.6",
+    "express": "^5.2.1"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^24.12.0",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.2.2",
+    "tsx": "^4.23.11",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.0"
+  }
+}

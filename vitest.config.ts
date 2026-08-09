@@ -1,4 +1,4 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig, configDefaults } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
@@ -13,6 +13,11 @@ export default defineConfig({
     globals: true,
     environment: "jsdom",
     setupFiles: ["./src/test/setup.ts"],
+    // server/ はローカル推論サーバー用の独立した npm パッケージ（自前の
+    // node_modules・vitest.config.ts・`npm test` を持つ、issue #32）。
+    // ルートの vitest はデフォルトで node_modules 配下しか除外しないため、
+    // 除外しないと server/test/**/*.test.ts を jsdom 環境で拾ってしまい失敗する。
+    exclude: [...configDefaults.exclude, "server/**"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "json-summary", "html"],
