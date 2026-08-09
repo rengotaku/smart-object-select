@@ -6,14 +6,14 @@
 
 Photoshop の「オブジェクト選択ツール」相当をブラウザだけで実現する React SPA。画像をアップロードして任意の位置をクリックすると、その位置のオブジェクトが SAM（Segment Anything Model、実際には軽量蒸留版の SlimSAM）で自動的にマスク選択され、PNG 透過切り抜き等で書き出せる。
 
-- **バックエンドが無い**。推論・画像処理はすべてブラウザ内で完結する（サーバーへ画像もクリック座標も送らない）
+- **実行方式は2種類**（`ExecutionMode`、issue [#31](https://github.com/rengotaku/smart-object-select/issues/31)）。既定の「ブラウザ内蔵」（`browser`）はバックエンドが無く、推論・画像処理はすべてブラウザ内で完結する（サーバーへ画像もクリック座標も送らない）。「PCローカルサーバー」（`local-server`）を選んだ場合のみ、`server/`（Node.js + `onnxruntime-node`）へ画像・クリック座標を送って推論する。サーバーは PC 上で自分がローカル起動するプロセスであり、外部ネットワークには送信しない（§3「`server/`」参照）
 - `my-boilerplate` の `react-spa` テンプレートから scaffold されている。テンプレート付属のサンプル（`HomePage`/`LoginPage`/`UsersPage` とその依存一式の認証・ユーザー一覧デモ機能）は削除済みで、アプリは `/segment` 単一構成（issue [#30](https://github.com/rengotaku/smart-object-select/issues/30)）。**この機能のエントリポイントは `/segment` ルート**（`src/App.tsx` の `<Route path="segment" element={<SegmentPage />} />`、`/` はそこへ redirect する）
 - モデル（`Xenova/slimsam-77-uniform`、`src/lib/sam/constants.ts` の `SAM_MODEL_ID`、Apache-2.0）と推論ランタイムの WASM（onnxruntime-web、MIT）は `public/models/slimsam-77-uniform/` / `public/onnxruntime/` に自前ホスティングしている。`transformersLoader.ts` が `env.allowRemoteModels = false` 等を設定しており、初回アクセス以降 Hugging Face Hub / jsDelivr など外部サービスへは一切依存しない（`docs/adr/0005-offline-first-model-delivery.md`）
 - Service Worker（`public/sw.js`）がモデルアセットとアプリ本体を Cache Storage に事前キャッシュしており、2回目以降はオフラインでも `/segment` が動作する（§3・§7）
 - 初回モデルロード中はファイル単位のダウンロード進捗を Worker → メインスレッドの通知チャネル（既存の id 相関 request/response とは別経路、§4）で `SegmentPage` に表示する
 - 推論ランタイムは `@huggingface/transformers`（旧 transformers.js、`package.json` では `^4.2.0`）。実行デバイスは WebGPU を優先し、無ければ WASM にフォールバックする
 
-設計判断の経緯は GitHub issue [#1](https://github.com/rengotaku/smart-object-select/issues/1) の Decision Log と、`docs/adr/0001-client-side-sam-in-web-worker.md` / `docs/adr/0002-generation-guards-for-async-races.md` に記録されている。本ドキュメントはそれらの要点を「触るファイル」に接続する形でまとめ直したもの。
+設計判断の経緯は GitHub issue [#1](https://github.com/rengotaku/smart-object-select/issues/1)（初期実装）・[#31](https://github.com/rengotaku/smart-object-select/issues/31)（PCローカル推論サーバー化）の Decision Log と、`docs/adr/0001-client-side-sam-in-web-worker.md` / `docs/adr/0002-generation-guards-for-async-races.md` / `docs/adr/0006-local-inference-server.md` に記録されている。本ドキュメントはそれらの要点を「触るファイル」に接続する形でまとめ直したもの。
 
 ## 2. 全体像: データフローとレイヤー境界
 
@@ -126,6 +126,25 @@ embedding の計算（encoder）は画像 1 枚につき 1 回だけ。クリッ
 - `src/main.tsx` の `registerServiceWorker()` が `navigator.serviceWorker.register("/sw.js")` を行う。未対応環境・登録失敗は `try/catch` で握りアプリ本体の起動は妨げない
 
 **壊すと危ない前提**: `public/sw.js` と `src/lib/serviceWorker/cachePolicy.ts` はロジックを手動同期している。片方だけ変更すると齟齬が生じるため、キャッシュ対象パス・パスプレフィックス・固定アセット一覧を変える場合は**両ファイルを同時に更新**すること（ADR 0005「変えてよい前提 / 壊すと危ない前提」）。
+
+### `server/`（PCローカル推論サーバー、issue [#31](https://github.com/rengotaku/smart-object-select/issues/31)）
+
+`src/lib/sam/` の外、リポジトリルート直下に独立した npm パッケージとして存在する（`server/package.json`。ルートの依存管理とは完全分離、`docs/adr/0006-local-inference-server.md` 参照）。実行方式が「PCローカルサーバー」のときだけ `httpSamClient.ts` から HTTP で呼ばれる。
+
+**表1a: `server/src/` の各モジュールの責務**
+
+| ファイル | 役割 |
+| --- | --- |
+| `app.ts` | `createServerApp(runtime, sessionStoreOptions?, modelRuntimes?)` — Express アプリを組み立てる。`GET /health` / `GET /models` / `POST /sessions` / `POST /sessions/:id/segment` / `DELETE /sessions/:id` を提供。`runtime`/`modelRuntimes` を DI できるため、テストは実 `onnxruntime-node` を使わず fake `SamRuntime` で検証する |
+| `sessionStore.ts` | `Map<sessionId, SamSession>` でセッションを管理。最終アクセス時刻ベースの TTL（既定30分、`SESSION_TTL_MS`）で自動破棄し、クライアントが `DELETE` を送らず切断してもメモリが無期限に増え続けないようにする |
+| `nodeTransformersLoader.ts` | `src/lib/sam/transformersLoader.ts` の Node 版アダプタ。`@huggingface/transformers` の Node ビルドは内部で `onnxruntime-node` を使う。`createNodeTransformersSamRuntime(modelId)` はモデルごとにロード結果をメモ化する |
+| `modelRegistry.ts` | `src/lib/sam/constants.ts` の `AVAILABLE_SAM_MODELS` を re-export（サーバー・フロント間でモデル一覧を単一ソース化） |
+| `wireFormat.ts` | リクエストボディのデコード・バリデーション（`decodeImagePayload`/`decodePointsPayload`/`decodeModelId`）とレスポンスのエンコード（`encodeMasks`） |
+| `server.ts` | エントリポイント。`AVAILABLE_MODELS` 全モデル分の `SamRuntime` を `Map` に詰めて `createServerApp` に渡し、`127.0.0.1` 固定でループバック bind する（LAN上の第三者からの意図しないアクセスを防ぐ） |
+
+**壊すと危ない前提**: `src/lib/sam/samSession.ts`（`createSamSession`）はブラウザ非依存の純粋ロジックのため `server/` からもそのまま import して再利用している。世代ガード（§5）等のロジックを `server/` 側で重複実装しない。
+
+**変えてよい前提**: `createServerApp`/`createSessionStore`/`createNodeTransformersSamRuntime` の `modelId`/`modelRuntimes` 引数はすべてオプショナル。省略時は単一モデル（`SAM_MODEL_ID`）のみの #32 時点の挙動と後方互換。
 
 ## 4. Web Worker の境界
 
@@ -246,6 +265,9 @@ TDD の「先に赤を見る」と目的は同じだが、**修正系のタス�
 | クリック座標の変換ロジックを変える（表示縮小率の扱い等）                               | `src/lib/sam/coords.ts`（`toImageCoords`）                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | coverage 閾値・除外対象を変える                                                        | `vitest.config.ts` の `coverage.exclude`、`.github/workflows/ci.yml` の閾値判定（`80` の箇所）                                                                                                                                                                                                                                                                                                                                                                                          |
 | dev/build/test/lint コマンドを変える                                                   | `Makefile`（`make help` で一覧）。`ci` ターゲットは `lint format-check test-cov build` で、`build`（`npm run build` = `tsc -b && vite build`）が型チェックを兼ねる。CI ワークフロー（`.github/workflows/ci.yml`）はこれとは別に `npx tsc -b --noEmit` を明示ステップとして持つ（issue #5 で `tsc --noEmit`（`-b` なし）が0ファイルしか検査していなかった過去の不具合を踏まえた明示化）                                                                                                  |
+| 実行方式（ブラウザ内蔵/PCローカルサーバー）の切り替えUIを変える                        | `src/lib/sam/executionMode.ts`（`ExecutionMode` 型）、`src/hooks/useSamEngine.ts`（`executionMode`/`serverUrl`/`modelId` で生成するクライアントを分岐）、`src/pages/SegmentPage.tsx`（セレクタ・サーバーURL入力・モデル選択UI）                                                                                                                                                                                                                                                       |
+| PCローカルサーバー側にモデルを追加する                                                 | `src/lib/sam/constants.ts`（`AVAILABLE_SAM_MODELS`。フロント・サーバー共通の単一ソース、`server/src/modelRegistry.ts` が re-export）。モデル資産の追加自体は「モデルを変える」行と同じ手順（`public/models/<新ID>/` + `cachePolicy.ts`/`sw.js` 更新）。サーバー側は `server/src/server.ts` が `AVAILABLE_MODELS` を自動的に読んで `SamRuntime` を用意するため追加の配線は不要                                                                                                        |
+| PCローカルサーバーのAPIを変える                                                        | `server/src/app.ts`（ルーティング）、`server/src/wireFormat.ts`（リクエスト/レスポンスの形式）、`src/lib/sam/httpSamClient.ts`（対応するフロント側呼び出し）を揃って更新すること                                                                                                                                                                                                                                                                                                       |
 
 ## 8. 参考
 
@@ -254,3 +276,5 @@ TDD の「先に赤を見る」と目的は同じだが、**修正系のタス�
 - `docs/adr/0002-generation-guards-for-async-races.md`（世代カウンタの設計、テストの扱い）
 - `docs/adr/0004-slimsam-box-input-unsupported.md`（box プロンプトが現行モデルで機能しない理由、positive/negative 複数点への切り替え）
 - `docs/adr/0005-offline-first-model-delivery.md`（モデル配信をオフライン完結型に切り替えた決定。進捗表示の自前集計・自前ホスティング・Service Worker キャッシュの3点セット、issue #10/#21/#22/#23）
+- GitHub issue [#31](https://github.com/rengotaku/smart-object-select/issues/31)（PCローカル推論サーバー化の親issue・Decision Log。実現方式・技術スタック・API仕様変更の経緯）
+- `docs/adr/0006-local-inference-server.md`（PCローカル推論サーバーを追加した決定。既存のブラウザ内蔵実行を維持したまま実行方式を選択可能にした理由、issue #31/#32/#33/#34）
