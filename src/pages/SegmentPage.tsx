@@ -25,8 +25,16 @@ import { cn } from "@/lib/utils";
 import { normalizeServerBaseUrl } from "@/lib/sam";
 import type { ExecutionMode, SamModelDescriptor, SamWorkerClient } from "@/lib/sam";
 
-/** ローカル推論サーバー（issue #32、`server/`）の既定ポート（`server/README.md` 参照）。 */
-const DEFAULT_LOCAL_SERVER_URL = "http://localhost:8787";
+/**
+ * ローカル推論サーバー（issue #32、`server/`）の既定URL。
+ *
+ * `wt dev`（`~/.config/wt/wt serve`）環境では `server` service が動的ポートで起動し、
+ * そのポートが `VITE_SERVER_URL` として `web` service の起動時 env に注入される
+ * （`wt dev show --json` 参照）。素の `npm run dev`（wt dev 非経由）ではこの env が
+ * 無いため、`server/README.md` 記載の固定既定ポート `8787` にフォールバックする。
+ */
+const DEFAULT_LOCAL_SERVER_URL =
+  import.meta.env.VITE_SERVER_URL ?? "http://localhost:8787";
 
 export interface SegmentPageProps {
   /**
