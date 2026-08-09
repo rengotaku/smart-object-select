@@ -45,8 +45,13 @@ onnxruntime-node / モデルファイルには依存しない。
 ### `POST /sessions`
 
 ```json
-{ "image": { "data": "<base64 RGBA bytes>", "width": 640, "height": 480 } }
+{
+  "image": { "data": "<base64 RGBA bytes>", "width": 640, "height": 480 },
+  "modelId": "slimsam-77-uniform"
+}
 ```
+
+`modelId` は省略可（省略時は既定モデル）。`GET /models` の一覧に無い `modelId` を指定すると `400` を返す。
 
 → `200 { "sessionId": "<uuid>" }`
 
