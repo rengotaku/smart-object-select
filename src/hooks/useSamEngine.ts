@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import {
+  createHttpSamClient,
   createSamWorkerClient,
+  type ExecutionMode,
   type SamDevice,
   type SamProgressEvent,
   type SamWorkerClient,
@@ -17,6 +19,21 @@ export interface UseSamEngineResult {
   progress: SamProgressEvent | null;
 }
 
+export interface UseSamEngineOptions {
+  /** 実行方式。省略時は "browser"（従来通り Web Worker + SamDevice 検出）。 */
+  executionMode?: ExecutionMode;
+  /** executionMode が "local-server" のときのローカル推論サーバー URL。 */
+  serverUrl?: string;
+  /** executionMode が "local-server" のときの選択モデル ID。 */
+  modelId?: string;
+  /**
+   * テストから fake SamWorkerClient を注入するためのフック。
+   * 指定時は executionMode に関わらずこのクライアントが使われる。
+   * 省略時は executionMode の既定（実 Worker クライアント）が使われる。
+   */
+  createClient?: () => SamWorkerClient;
+}
+
 /**
  * 実 Worker を起動する既定のクライアントファクトリ。
  * Vite の worker import 構文を使うため、テストからは差し替えて
@@ -30,10 +47,32 @@ function createDefaultClient(): SamWorkerClient {
 }
 
 /**
- * SAM 推論エンジン（Web Worker）のライフサイクルを管理する React hook。
- * マウント時に client を生成して init() を実行し、アンマウント時に terminate() する。
+ * executionMode に応じた実クライアントファクトリを作る。
+ * "local-server" では serverUrl/modelId が未選択の場合、同期的に throw して
+ * 呼び出し元（effect 内の try/catch）で error 状態に落とし込む。
  */
-export function useSamEngine(createClient?: () => SamWorkerClient): UseSamEngineResult {
+function resolveClientFactory(options: UseSamEngineOptions): () => SamWorkerClient {
+  if (options.createClient) {
+    return options.createClient;
+  }
+  if (options.executionMode === "local-server") {
+    const { serverUrl, modelId } = options;
+    return () => {
+      if (!serverUrl || !modelId) {
+        throw new Error("ローカル推論サーバーの URL とモデルを選択してください");
+      }
+      return createHttpSamClient(serverUrl, modelId);
+    };
+  }
+  return createDefaultClient;
+}
+
+/**
+ * SAM 推論エンジン（Web Worker または PC ローカル推論サーバー）のライフサイクルを管理する
+ * React hook。マウント時に client を生成して init() を実行し、アンマウント時に
+ * terminate() する。
+ */
+export function useSamEngine(options: UseSamEngineOptions = {}): UseSamEngineResult {
   // マウント直後は必ず init() が走り始めるため、初期値をそのまま "initializing"
   // にする（"idle" は型の完全性のために残る値で、この hook 自体は遷移しない）。
   const [status, setStatus] = useState<SamEngineStatus>("initializing");
@@ -42,10 +81,11 @@ export function useSamEngine(createClient?: () => SamWorkerClient): UseSamEngine
   const [client, setClient] = useState<SamWorkerClient | null>(null);
   const [progress, setProgress] = useState<SamProgressEvent | null>(null);
 
-  // createClient は初回レンダー時点の値だけを使う（マウント/アンマウントの
+  // options は初回レンダー時点の値だけを使う（マウント/アンマウントの
   // 1回だけ初期化 effect を走らせるための lazy snapshot。以後の再レンダーで
-  // createClient の参照が変わっても再初期化はしない）。
-  const [clientFactory] = useState(() => createClient ?? createDefaultClient);
+  // options の参照が変わっても再初期化はしない。実行方式を切り替えたい呼び出し側は
+  // コンポーネントを key で再マウントすること）。
+  const [clientFactory] = useState(() => resolveClientFactory(options));
 
   useEffect(() => {
     let cancelled = false;

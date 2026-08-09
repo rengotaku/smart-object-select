@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   AlertTriangle,
   Cpu,
@@ -5,6 +6,7 @@ import {
   Loader2,
   RefreshCw,
   RotateCcw,
+  Server,
   Zap,
 } from "lucide-react";
 
@@ -20,24 +22,207 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useSamEngine, useSegmentation } from "@/hooks";
 import { cn } from "@/lib/utils";
-import type { SamWorkerClient } from "@/lib/sam";
+import type { ExecutionMode, SamModelDescriptor, SamWorkerClient } from "@/lib/sam";
+
+/** ローカル推論サーバー（issue #32、`server/`）の既定ポート（`server/README.md` 参照）。 */
+const DEFAULT_LOCAL_SERVER_URL = "http://localhost:8787";
 
 export interface SegmentPageProps {
   /**
    * テストから fake SamWorkerClient を注入するためのフック。
    * 省略時は useSamEngine の既定（実 Worker クライアント）が使われる。
+   * 実行方式が「PCローカルサーバー」のときは使われない（サーバーへの HTTP クライアントが使われる）。
    */
   createClient?: () => SamWorkerClient;
 }
 
 export function SegmentPage({ createClient }: SegmentPageProps = {}) {
+  const [executionMode, setExecutionMode] = useState<ExecutionMode>("browser");
+  const [serverUrl, setServerUrl] = useState(DEFAULT_LOCAL_SERVER_URL);
+  const [selectedModelId, setSelectedModelId] = useState("");
+  const [serverModels, setServerModels] = useState<SamModelDescriptor[]>([]);
+  const [serverModelsLoading, setServerModelsLoading] = useState(false);
+  const [serverModelsError, setServerModelsError] = useState<string | null>(null);
+
+  // 実行方式が「PCローカルサーバー」の間、サーバーURLが変わるたびに GET /models で
+  // モデル選択UIの選択肢を取得する。サーバー未起動・接続失敗時はここでエラーを検知して
+  // 表示する（DoD: サーバー未起動状態でエラーメッセージが表示されること）。
+  useEffect(() => {
+    if (executionMode !== "local-server") {
+      return;
+    }
+
+    let cancelled = false;
+
+    // setState はここで同期的に呼ばず、Promise チェーンの中（マイクロタスク）へ逃がす
+    // （react-hooks/set-state-in-effect対策。effect body 内での同期 setState 呼び出しは
+    // カスケードレンダーを招くため禁止されている。useSamEngine.ts の同種コメント参照）。
+    Promise.resolve()
+      .then(() => {
+        if (cancelled) return undefined;
+        setServerModelsLoading(true);
+        setServerModelsError(null);
+        return fetch(`${serverUrl}/models`);
+      })
+      .then((response) => {
+        if (cancelled || !response) return undefined;
+        if (!response.ok) {
+          throw new Error(`サーバーエラー（HTTP ${response.status}）`);
+        }
+        return response.json() as Promise<SamModelDescriptor[]>;
+      })
+      .then((models) => {
+        if (cancelled || !models) return;
+        setServerModels(models);
+        setSelectedModelId((prev) =>
+          prev && models.some((model) => model.id === prev) ? prev : (models[0]?.id ?? "")
+        );
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setServerModels([]);
+        setSelectedModelId("");
+        setServerModelsError(
+          "ローカル推論サーバーに接続できません。サーバーが起動しているか確認するか、" +
+            "ブラウザ内蔵に切り替えてください。"
+        );
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setServerModelsLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [executionMode, serverUrl]);
+
+  // browser: 常に準備できている。local-server: モデル選択が済むまで engine を起動しない。
+  const engineReady = executionMode === "browser" || Boolean(selectedModelId);
+  const selectedModelName =
+    serverModels.find((model) => model.id === selectedModelId)?.name ?? selectedModelId;
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">Segment</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          任意の位置をクリックしてオブジェクトをオートマスク選択します
+        </p>
+      </div>
+
+      <Card>
+        <CardContent className="flex flex-col gap-4 pt-6 sm:flex-row sm:flex-wrap sm:items-end">
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="execution-mode" className="text-sm font-medium">
+              実行方式
+            </label>
+            <select
+              id="execution-mode"
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+              value={executionMode}
+              onChange={(event) => setExecutionMode(event.target.value as ExecutionMode)}
+            >
+              <option value="browser">ブラウザ内蔵</option>
+              <option value="local-server">PCローカルサーバー</option>
+            </select>
+          </div>
+
+          {executionMode === "local-server" && (
+            <>
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="server-url" className="text-sm font-medium">
+                  サーバーURL
+                </label>
+                <input
+                  id="server-url"
+                  type="text"
+                  className="h-9 w-56 rounded-md border border-input bg-background px-3 text-sm"
+                  value={serverUrl}
+                  onChange={(event) => setServerUrl(event.target.value)}
+                />
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label htmlFor="server-model" className="text-sm font-medium">
+                  モデル
+                </label>
+                <select
+                  id="server-model"
+                  className="h-9 min-w-40 rounded-md border border-input bg-background px-3 text-sm"
+                  value={selectedModelId}
+                  disabled={serverModelsLoading || serverModels.length === 0}
+                  onChange={(event) => setSelectedModelId(event.target.value)}
+                >
+                  {serverModels.length === 0 && (
+                    <option value="">
+                      {serverModelsLoading
+                        ? "読み込み中..."
+                        : "利用可能なモデルがありません"}
+                    </option>
+                  )}
+                  {serverModels.map((model) => (
+                    <option key={model.id} value={model.id}>
+                      {model.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {serverModelsError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>サーバーに接続できません</AlertTitle>
+          <AlertDescription>{serverModelsError}</AlertDescription>
+        </Alert>
+      )}
+
+      {engineReady && (
+        <SegmentWorkspace
+          // 実行方式・サーバーURL・モデルを切り替えたら engine を作り直す
+          // （useSamEngine は初回マウント時点の値で固定する設計のため、key で再マウントする）。
+          key={
+            executionMode === "local-server"
+              ? `local-server:${serverUrl}:${selectedModelId}`
+              : "browser"
+          }
+          executionMode={executionMode}
+          serverUrl={serverUrl}
+          modelId={selectedModelId}
+          modelName={selectedModelName}
+          createClient={executionMode === "browser" ? createClient : undefined}
+        />
+      )}
+    </div>
+  );
+}
+
+interface SegmentWorkspaceProps {
+  executionMode: ExecutionMode;
+  serverUrl?: string;
+  modelId?: string;
+  modelName?: string;
+  createClient?: () => SamWorkerClient;
+}
+
+function SegmentWorkspace({
+  executionMode,
+  serverUrl,
+  modelId,
+  modelName,
+  createClient,
+}: SegmentWorkspaceProps) {
   const {
     status: engineStatus,
     device,
     client,
     error: engineError,
     progress: engineProgress,
-  } = useSamEngine(createClient);
+  } = useSamEngine({ executionMode, serverUrl, modelId, createClient });
   const {
     status: segStatus,
     image,
@@ -71,16 +256,10 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Segment</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            任意の位置をクリックしてオブジェクトをオートマスク選択します
-          </p>
-        </div>
-
-        {engineStatus === "ready" && device && (
+      {engineStatus === "ready" && executionMode === "browser" && device && (
+        <div className="flex justify-end">
           <span
+            data-testid="engine-badge"
             className={cn(
               "inline-flex w-fit items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold",
               device === "webgpu"
@@ -95,8 +274,20 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
             )}
             {device === "webgpu" ? "WebGPU" : "WASM"}
           </span>
-        )}
-      </div>
+        </div>
+      )}
+
+      {engineStatus === "ready" && executionMode === "local-server" && (
+        <div className="flex justify-end">
+          <span
+            data-testid="engine-badge"
+            className="inline-flex w-fit items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 text-xs font-semibold text-secondary-foreground"
+          >
+            <Server className="size-3.5" aria-hidden="true" />
+            {modelName}
+          </span>
+        </div>
+      )}
 
       {engineStatus === "initializing" && (
         <Card className="max-w-md">
@@ -112,7 +303,7 @@ export function SegmentPage({ createClient }: SegmentPageProps = {}) {
         </Card>
       )}
 
-      {engineStatus === "ready" && device === "wasm" && (
+      {engineStatus === "ready" && executionMode === "browser" && device === "wasm" && (
         <Alert variant="destructive">
           <AlertTriangle className="size-4" />
           <AlertTitle>WASM で実行しています</AlertTitle>

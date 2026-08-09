@@ -28,3 +28,5 @@ export {
   type SamWorkerClient,
   type WorkerLike,
 } from "./samWorkerClient";
+export { createHttpSamClient, type SamModelDescriptor } from "./httpSamClient";
+export { type ExecutionMode } from "./executionMode";

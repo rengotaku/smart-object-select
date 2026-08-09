@@ -277,4 +277,83 @@ describe("SegmentPage", () => {
       segmentDeferred.resolve([mask1]);
     });
   });
+
+  it("Case 6: 実行方式セレクタで「PCローカルサーバー」を選ぶとモデル選択UIが表示される", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.endsWith("/models")) {
+        return new Response(
+          JSON.stringify([{ id: "slimsam-77-uniform", name: "SlimSAM 77 Uniform" }]),
+          { status: 200 }
+        );
+      }
+      throw new Error(`unexpected fetch: ${href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createFakeClient({
+      init: vi.fn(async (): Promise<SamDevice> => "webgpu"),
+    });
+    render(<SegmentPage createClient={() => client} />);
+
+    expect(screen.queryByLabelText("モデル")).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("実行方式"), {
+      target: { value: "local-server" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("モデル")).toBeInTheDocument();
+    });
+  });
+
+  it("追加: サーバー未起動状態で「PCローカルサーバー」を選ぶとエラーメッセージが表示される", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new TypeError("Failed to fetch");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createFakeClient();
+    render(<SegmentPage createClient={() => client} />);
+
+    fireEvent.change(screen.getByLabelText("実行方式"), {
+      target: { value: "local-server" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText("サーバーに接続できません")).toBeInTheDocument();
+    });
+  });
+
+  it("追加: PCローカルサーバーでモデルを選択すると ready になり選択したモデル名のバッジが表示される", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.endsWith("/health")) {
+        return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+      }
+      if (href.endsWith("/models")) {
+        return new Response(
+          JSON.stringify([{ id: "slimsam-77-uniform", name: "SlimSAM 77 Uniform" }]),
+          { status: 200 }
+        );
+      }
+      throw new Error(`unexpected fetch: ${href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = createFakeClient();
+    render(<SegmentPage createClient={() => client} />);
+
+    fireEvent.change(screen.getByLabelText("実行方式"), {
+      target: { value: "local-server" },
+    });
+
+    await waitFor(() => {
+      expect(screen.getByLabelText("モデル")).toHaveValue("slimsam-77-uniform");
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("engine-badge")).toHaveTextContent("SlimSAM 77 Uniform");
+    });
+  });
 });
