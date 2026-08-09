@@ -140,8 +140,15 @@ function wrapProcessor(processor: TransformersSamProcessor): SamProcessorLike {
  * `loadModel` の `device` 引数（`SamDevice` = `"webgpu" | "wasm"`）はブラウザ向けの型を
  * そのまま流用しているだけで、このアダプタでは無視する。Node は onnxruntime-node の
  * CPU 実行しかサポートしないため、常に `device: "cpu"` でロードする。
+ *
+ * `modelId` は省略可能（既定 `SAM_MODEL_ID`、後方互換のため）。issue #33 コメント
+ * 「複数モデル対応」により、`server.ts` が `AVAILABLE_MODELS` の各モデルごとにこの関数を
+ * 呼び出し `Map<modelId, SamRuntime>` を組み立てる。1つの `SamRuntime` インスタンスは
+ * 常に1つの `modelId` に束縛され、そのモデルの `modelPromise`/`processorPromise` だけを
+ * メモ化する（＝実質的に「モデルごとのロード結果キャッシュ」。呼び出し側の Map が
+ * modelId → インスタンスの対応を保持することで、モデル横断のキャッシュ管理を実現する）。
  */
-export function createNodeTransformersSamRuntime(): SamRuntime {
+export function createNodeTransformersSamRuntime(modelId: string = SAM_MODEL_ID): SamRuntime {
   configureSelfHostedEnv();
 
   let modelPromise: Promise<SamModelLike> | null = null;
@@ -150,7 +157,7 @@ export function createNodeTransformersSamRuntime(): SamRuntime {
   return {
     async loadModel() {
       if (!modelPromise) {
-        modelPromise = SamModel.from_pretrained(SAM_MODEL_ID, {
+        modelPromise = SamModel.from_pretrained(modelId, {
           device: "cpu",
           dtype: MODEL_DTYPE,
         }).then((model) => wrapModel(model as unknown as TransformersSamModel));
@@ -159,7 +166,7 @@ export function createNodeTransformersSamRuntime(): SamRuntime {
     },
     async loadProcessor() {
       if (!processorPromise) {
-        processorPromise = AutoProcessor.from_pretrained(SAM_MODEL_ID, {}).then((processor) =>
+        processorPromise = AutoProcessor.from_pretrained(modelId, {}).then((processor) =>
           wrapProcessor(processor as unknown as TransformersSamProcessor)
         );
       }

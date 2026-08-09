@@ -1,6 +1,8 @@
 import type { Application } from "express";
 import { createServerApp } from "./app";
+import { AVAILABLE_MODELS } from "./modelRegistry";
 import { createNodeTransformersSamRuntime } from "./nodeTransformersLoader";
+import type { SamRuntime } from "../../src/lib/sam/samSession";
 
 /**
  * ローカル推論専用サーバーのため、bind先はループバック（127.0.0.1）に固定する。
@@ -30,7 +32,14 @@ function isMainModule(): boolean {
 // `npm start`/`npm run dev`（tsx で直接実行）されたときのみ実サーバーを起動する。
 // テストからの import では起動しない（startServer を fake app で直接検証する）。
 if (isMainModule()) {
-  const runtime = createNodeTransformersSamRuntime();
-  const app = createServerApp(runtime);
+  // AVAILABLE_MODELS（`AVAILABLE_SAM_MODELS`）の各モデルごとに専用の SamRuntime を用意し、
+  // POST /sessions の modelId で選ばれたモデルが実際にそのモデルで推論されるようにする
+  // （issue #33 コメント「複数モデル対応」、codex レビュー指摘対応）。
+  const modelRuntimes = new Map<string, SamRuntime>(
+    AVAILABLE_MODELS.map((model) => [model.id, createNodeTransformersSamRuntime(model.id)])
+  );
+  const defaultModelId = AVAILABLE_MODELS[0].id;
+  const defaultRuntime = modelRuntimes.get(defaultModelId) ?? createNodeTransformersSamRuntime();
+  const app = createServerApp(defaultRuntime, {}, modelRuntimes);
   startServer(app, resolvePort());
 }

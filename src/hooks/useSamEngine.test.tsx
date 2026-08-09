@@ -47,7 +47,7 @@ describe("useSamEngine", () => {
     const client = createFakeClient({
       init: vi.fn(async (): Promise<SamDevice> => "webgpu"),
     });
-    const { result } = renderHook(() => useSamEngine(() => client));
+    const { result } = renderHook(() => useSamEngine({ createClient: () => client }));
 
     await waitFor(() => {
       expect(result.current.status).toBe("ready");
@@ -62,7 +62,7 @@ describe("useSamEngine", () => {
     const client = createFakeClient({
       init: vi.fn(async (): Promise<SamDevice> => "wasm"),
     });
-    const { result } = renderHook(() => useSamEngine(() => client));
+    const { result } = renderHook(() => useSamEngine({ createClient: () => client }));
 
     await waitFor(() => {
       expect(result.current.status).toBe("ready");
@@ -76,7 +76,7 @@ describe("useSamEngine", () => {
     const client = createFakeClient({
       init: vi.fn().mockRejectedValue(failure),
     });
-    const { result } = renderHook(() => useSamEngine(() => client));
+    const { result } = renderHook(() => useSamEngine({ createClient: () => client }));
 
     await waitFor(() => {
       expect(result.current.status).toBe("error");
@@ -88,7 +88,9 @@ describe("useSamEngine", () => {
 
   it("アンマウント時に terminate() を呼ぶ", async () => {
     const client = createFakeClient();
-    const { result, unmount } = renderHook(() => useSamEngine(() => client));
+    const { result, unmount } = renderHook(() =>
+      useSamEngine({ createClient: () => client })
+    );
 
     await waitFor(() => {
       expect(result.current.status).toBe("ready");
@@ -109,7 +111,9 @@ describe("useSamEngine", () => {
           })
       ),
     });
-    const { result, unmount } = renderHook(() => useSamEngine(() => client));
+    const { result, unmount } = renderHook(() =>
+      useSamEngine({ createClient: () => client })
+    );
 
     expect(result.current.status).toBe("initializing");
     unmount();
@@ -160,7 +164,7 @@ describe("useSamEngine", () => {
     let renderError: unknown;
     let result: { current: UseSamEngineResult } | undefined;
     try {
-      result = renderHook(() => useSamEngine(createClient)).result;
+      result = renderHook(() => useSamEngine({ createClient })).result;
     } catch (err) {
       renderError = err;
     }
@@ -183,7 +187,7 @@ describe("useSamEngine", () => {
         };
       }),
     });
-    const { result } = renderHook(() => useSamEngine(() => client));
+    const { result } = renderHook(() => useSamEngine({ createClient: () => client }));
 
     await waitFor(() => {
       expect(client.onProgress).toHaveBeenCalledTimes(1);
@@ -206,7 +210,9 @@ describe("useSamEngine", () => {
     const client = createFakeClient({
       onProgress: vi.fn(() => unsubscribe),
     });
-    const { result, unmount } = renderHook(() => useSamEngine(() => client));
+    const { result, unmount } = renderHook(() =>
+      useSamEngine({ createClient: () => client })
+    );
 
     await waitFor(() => {
       expect(result.current.status).toBe("ready");
@@ -215,5 +221,45 @@ describe("useSamEngine", () => {
     unmount();
 
     expect(unsubscribe).toHaveBeenCalledTimes(1);
+  });
+
+  it("追加: executionMode が local-server のとき createHttpSamClient で client を生成する", async () => {
+    const fetchMock = vi.fn(async (url: string | URL | Request) => {
+      const href = String(url);
+      if (href.endsWith("/health")) {
+        return new Response(JSON.stringify({ status: "ok" }), { status: 200 });
+      }
+      if (href.endsWith("/models")) {
+        return new Response(JSON.stringify([{ id: "model-a", name: "Model A" }]), {
+          status: 200,
+        });
+      }
+      throw new Error(`unexpected fetch: ${href}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() =>
+      useSamEngine({
+        executionMode: "local-server",
+        serverUrl: "http://localhost:8787",
+        modelId: "model-a",
+      })
+    );
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("ready");
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith("http://localhost:8787/health", undefined);
+  });
+
+  it("追加: executionMode が local-server で serverUrl/modelId 未指定なら error 状態になる", async () => {
+    const { result } = renderHook(() => useSamEngine({ executionMode: "local-server" }));
+
+    await waitFor(() => {
+      expect(result.current.status).toBe("error");
+    });
+
+    expect(result.current.error?.message).toMatch(/選択/);
   });
 });

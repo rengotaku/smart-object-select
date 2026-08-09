@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 import request from "supertest";
 import { createServerApp } from "../src/app";
-import { createFakeSamRuntime, makeTestImageBase64 } from "./helpers/fakeSamRuntime";
+import {
+  createFakeSamRuntime,
+  createFixedScoreSamRuntime,
+  makeTestImageBase64,
+} from "./helpers/fakeSamRuntime";
 
 describe("createServerApp", () => {
   it("Case 6: GET /health が200を返す", async () => {
@@ -224,5 +228,101 @@ describe("createServerApp（codex レビュー指摘対応: RGBAデータ長・�
       .send({ image: { data: makeTestImageBase64(1, 1), width: 2, height: 2 } });
 
     expect(res.status).toBe(400);
+  });
+});
+
+describe("createServerApp（codex レビュー指摘対応: 複数モデル対応 / modelId ルーティング）", () => {
+  it("追加: modelId を指定すると対応する SamRuntime で推論される（既定モデルにフォールバックしない）", async () => {
+    const defaultRuntime = createFixedScoreSamRuntime(0.11);
+    const otherRuntime = createFixedScoreSamRuntime(0.99);
+    const modelRuntimes = new Map([
+      ["default-model", defaultRuntime],
+      ["other-model", otherRuntime],
+    ]);
+    const app = createServerApp(defaultRuntime, {}, modelRuntimes);
+
+    const createRes = await request(app)
+      .post("/sessions")
+      .send({
+        image: { data: makeTestImageBase64(2, 2), width: 2, height: 2 },
+        modelId: "other-model",
+      });
+    expect(createRes.status).toBe(200);
+    const sessionId = createRes.body.sessionId as string;
+
+    const segmentRes = await request(app)
+      .post(`/sessions/${sessionId}/segment`)
+      .send({ points: [{ x: 1, y: 1, label: 1 }] });
+
+    expect(segmentRes.status).toBe(200);
+    expect(segmentRes.body.masks[0].score).toBe(0.99);
+  });
+
+  it("追加: modelId を省略すると既定の runtime（第一引数）が使われる", async () => {
+    const defaultRuntime = createFixedScoreSamRuntime(0.11);
+    const otherRuntime = createFixedScoreSamRuntime(0.99);
+    const modelRuntimes = new Map([
+      ["default-model", defaultRuntime],
+      ["other-model", otherRuntime],
+    ]);
+    const app = createServerApp(defaultRuntime, {}, modelRuntimes);
+
+    const createRes = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(2, 2), width: 2, height: 2 } });
+    expect(createRes.status).toBe(200);
+    const sessionId = createRes.body.sessionId as string;
+
+    const segmentRes = await request(app)
+      .post(`/sessions/${sessionId}/segment`)
+      .send({ points: [{ x: 1, y: 1, label: 1 }] });
+
+    expect(segmentRes.status).toBe(200);
+    expect(segmentRes.body.masks[0].score).toBe(0.11);
+  });
+
+  it("追加: 未知の modelId を指定すると400を返し、サイレントに既定モデルへフォールバックしない", async () => {
+    const defaultRuntime = createFixedScoreSamRuntime(0.11);
+    const modelRuntimes = new Map([["default-model", defaultRuntime]]);
+    const app = createServerApp(defaultRuntime, {}, modelRuntimes);
+
+    const res = await request(app)
+      .post("/sessions")
+      .send({
+        image: { data: makeTestImageBase64(2, 2), width: 2, height: 2 },
+        modelId: "totally-unknown-model",
+      });
+
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain("totally-unknown-model");
+  });
+
+  it("追加: modelId が文字列でない場合400を返す", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    const res = await request(app)
+      .post("/sessions")
+      .send({
+        image: { data: makeTestImageBase64(2, 2), width: 2, height: 2 },
+        modelId: 12345,
+      });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("追加: modelRuntimes を渡さない（後方互換の単一runtime構成）場合、静的なモデル一覧に含まれる modelId は受理される", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    // AVAILABLE_MODELS（AVAILABLE_SAM_MODELS）に実在するモデルIDを指定する。
+    const res = await request(app)
+      .post("/sessions")
+      .send({
+        image: { data: makeTestImageBase64(2, 2), width: 2, height: 2 },
+        modelId: "slimsam-77-uniform",
+      });
+
+    expect(res.status).toBe(200);
   });
 });

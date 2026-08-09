@@ -4,6 +4,7 @@ import { AVAILABLE_MODELS } from "./modelRegistry";
 import { createSessionStore, SessionNotFoundError, type SessionStoreOptions } from "./sessionStore";
 import {
   decodeImagePayload,
+  decodeModelId,
   decodePointsPayload,
   encodeMasks,
   RequestValidationError,
@@ -37,13 +38,22 @@ function asyncHandler(
  *
  * `sessionStoreOptions` はセッション TTL・掃除間隔・時刻取得のDIポイント（`SessionStoreOptions`
  * 参照）。省略時は本番相当の既定値（TTL 30分、1分ごとにバックグラウンド掃除）で動く。
+ *
+ * `modelRuntimes`（省略可）は `modelId` ごとの `SamRuntime`（issue #33 コメント
+ * 「複数モデル対応」）。`POST /sessions` で指定された `modelId` の検証・ルーティングに使う。
+ * 省略時（既存呼び出し・テストとの後方互換）は `AVAILABLE_MODELS` の一覧を検証対象にしつつ、
+ * 実際の推論には常に `runtime`（第一引数、既定モデル）を使う。
  */
 export function createServerApp(
   runtime: SamRuntime,
-  sessionStoreOptions: SessionStoreOptions = {}
+  sessionStoreOptions: SessionStoreOptions = {},
+  modelRuntimes?: Map<string, SamRuntime>
 ): Application {
   const app = express();
-  const sessions = createSessionStore(runtime, sessionStoreOptions);
+  const sessions = createSessionStore(runtime, sessionStoreOptions, modelRuntimes);
+  const availableModelIds = modelRuntimes
+    ? Array.from(modelRuntimes.keys())
+    : AVAILABLE_MODELS.map((model) => model.id);
 
   app.use(cors({ origin: resolveAllowedOrigins() }));
   app.use(express.json({ limit: "50mb" }));
@@ -60,7 +70,10 @@ export function createServerApp(
     "/sessions",
     asyncHandler(async (req, res) => {
       const image = decodeImagePayload(req.body);
-      const sessionId = await sessions.create(image);
+      // 未知の modelId をサイレントに既定モデルへフォールバックさせず、明示的に 400 にする
+      // （codex レビュー指摘の核心: 選択したモデルと実際に推論に使われるモデルの不整合防止）。
+      const modelId = decodeModelId(req.body, availableModelIds);
+      const sessionId = await sessions.create(image, modelId);
       res.status(200).json({ sessionId });
     })
   );

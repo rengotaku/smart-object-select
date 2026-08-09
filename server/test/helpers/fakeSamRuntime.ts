@@ -93,3 +93,33 @@ export function makeTestImageBase64(width: number, height: number): string {
   const bytes = new Uint8Array(width * height * 4).fill(128);
   return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("base64");
 }
+
+/**
+ * 常に固定の `score` を返す最小限の fake `SamRuntime`。複数モデル対応（issue #33 コメント
+ * 「複数モデル対応」、codex レビュー指摘対応）のテストで、「どの `modelId` の runtime が
+ * 実際に使われたか」を score の違いで検証するために使う（`createFakeSamRuntime` の
+ * tag-by-image-size パターンとは別軸で、image サイズが同じでも区別できるようにする）。
+ */
+export function createFixedScoreSamRuntime(score: number): SamRuntime {
+  const processor: SamProcessorLike = {
+    process: vi.fn(async (image: SamImageInput) => ({
+      originalSizes: [[image.height, image.width]],
+      reshapedInputSizes: [[image.height, image.width]],
+    })),
+    reshapeInputPoints: vi.fn(() => [[[1, 1]]]),
+    addInputLabels: vi.fn(() => [[1]]),
+    postProcessMasks: vi.fn(
+      async (): Promise<MaskTensorLike[]> => [
+        { data: new Uint8Array([0, 255, 0, 255]), dims: [1, 1, 2, 2] },
+      ]
+    ),
+  };
+  const model: SamModelLike = {
+    getImageEmbeddings: vi.fn(async () => ({})),
+    decode: vi.fn(async () => ({ predMasks: {}, iouScores: [[[score]]] })),
+  };
+  return {
+    loadModel: vi.fn(async () => model),
+    loadProcessor: vi.fn(async () => processor),
+  };
+}
