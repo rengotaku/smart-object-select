@@ -26,6 +26,23 @@ function requireNumber(value: unknown, field: string): number {
   return value;
 }
 
+/**
+ * 画像1辺あたりの許容最大ピクセル数。この上限が無いと巨大な width/height を送りつけられ
+ * `width * height * 4` バイトの確保やデコードでメモリを圧迫しうる（codex レビュー指摘）。
+ */
+export const MAX_IMAGE_DIMENSION_PX = 8192;
+
+function requirePositiveInt(value: unknown, field: string, max: number): number {
+  const num = requireNumber(value, field);
+  if (!Number.isInteger(num) || num <= 0) {
+    throw new RequestValidationError(`field "${field}" must be a positive integer`);
+  }
+  if (num > max) {
+    throw new RequestValidationError(`field "${field}" must not exceed ${max}`);
+  }
+  return num;
+}
+
 function requireString(value: unknown, field: string): string {
   if (typeof value !== "string") {
     throw new RequestValidationError(`field "${field}" must be a string`);
@@ -51,10 +68,26 @@ export function decodeImagePayload(body: unknown): SamImageInput {
   }
   const imageBody = image as Record<string, unknown>;
   const data = requireString(requireField(imageBody, "data"), "image.data");
-  const width = requireNumber(requireField(imageBody, "width"), "image.width");
-  const height = requireNumber(requireField(imageBody, "height"), "image.height");
+  const width = requirePositiveInt(
+    requireField(imageBody, "width"),
+    "image.width",
+    MAX_IMAGE_DIMENSION_PX
+  );
+  const height = requirePositiveInt(
+    requireField(imageBody, "height"),
+    "image.height",
+    MAX_IMAGE_DIMENSION_PX
+  );
 
   const buffer = Buffer.from(data, "base64");
+  const expectedByteLength = width * height * 4;
+  if (buffer.byteLength !== expectedByteLength) {
+    throw new RequestValidationError(
+      `field "image.data" decoded length (${buffer.byteLength} bytes) does not match ` +
+        `width*height*4 (${expectedByteLength} bytes) for width=${width}, height=${height}`
+    );
+  }
+
   return {
     data: new Uint8ClampedArray(buffer.buffer, buffer.byteOffset, buffer.byteLength),
     width,

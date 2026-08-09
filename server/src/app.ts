@@ -1,7 +1,7 @@
 import cors from "cors";
 import express, { type Application, type NextFunction, type Request, type Response } from "express";
 import { AVAILABLE_MODELS } from "./modelRegistry";
-import { createSessionStore, SessionNotFoundError } from "./sessionStore";
+import { createSessionStore, SessionNotFoundError, type SessionStoreOptions } from "./sessionStore";
 import {
   decodeImagePayload,
   decodePointsPayload,
@@ -34,10 +34,16 @@ function asyncHandler(
  * 推論サーバーの Express アプリを組み立てる。`runtime` を DI することで、テストは
  * 実際の onnxruntime-node / モデルファイルを読まずに fake `SamRuntime` を注入できる
  * （issue #32 コメント「テストケース仕様」の mock/setup 制約）。
+ *
+ * `sessionStoreOptions` はセッション TTL・掃除間隔・時刻取得のDIポイント（`SessionStoreOptions`
+ * 参照）。省略時は本番相当の既定値（TTL 30分、1分ごとにバックグラウンド掃除）で動く。
  */
-export function createServerApp(runtime: SamRuntime): Application {
+export function createServerApp(
+  runtime: SamRuntime,
+  sessionStoreOptions: SessionStoreOptions = {}
+): Application {
   const app = express();
-  const sessions = createSessionStore(runtime);
+  const sessions = createSessionStore(runtime, sessionStoreOptions);
 
   app.use(cors({ origin: resolveAllowedOrigins() }));
   app.use(express.json({ limit: "50mb" }));

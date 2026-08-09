@@ -125,3 +125,104 @@ describe("createServerApp", () => {
     expect(segmentAAgain.body.masks[0].score).toBe(segmentA.body.masks[0].score);
   });
 });
+
+describe("createServerApp（codex レビュー指摘対応: セッション TTL 自動破棄）", () => {
+  // 検知/理由: クライアントが DELETE を送らずページを閉じる・通信断になるケースで
+  // セッションが Map に無期限に残りメモリを圧迫するのを防ぐ TTL 機構（issue #32 codexレビュー指摘）。
+  // `createServerApp` の `sessionStoreOptions` 経由で `now`/`sessionTtlMs` をDIし、
+  // 実時間の経過を待たずに決定的に検証する。
+  it("追加: TTLを過ぎて未アクセスのセッションはsegment呼び出し時に自動破棄され404になる", async () => {
+    const { runtime } = createFakeSamRuntime();
+    let currentTime = 0;
+    const app = createServerApp(runtime, {
+      ttlMs: 1000,
+      sweepIntervalMs: 0, // バックグラウンドタイマーに頼らず、遅延評価（get時のTTLチェック）で検証する
+      now: () => currentTime,
+    });
+
+    const createRes = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(2, 2), width: 2, height: 2 } });
+    const sessionId = createRes.body.sessionId as string;
+
+    currentTime += 2000; // TTL(1000ms)を超えて経過させる
+
+    const segmentRes = await request(app)
+      .post(`/sessions/${sessionId}/segment`)
+      .send({ points: [{ x: 1, y: 1, label: 1 }] });
+
+    expect(segmentRes.status).toBe(404);
+  });
+
+  it("追加: TTL内にsegmentでアクセスしたセッションは延命し404にならない", async () => {
+    const { runtime } = createFakeSamRuntime();
+    let currentTime = 0;
+    const app = createServerApp(runtime, {
+      ttlMs: 1000,
+      sweepIntervalMs: 0,
+      now: () => currentTime,
+    });
+
+    const createRes = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(2, 2), width: 2, height: 2 } });
+    const sessionId = createRes.body.sessionId as string;
+
+    currentTime += 900; // TTL未満でアクセス → lastAccessedAt が更新される
+    const firstSegment = await request(app)
+      .post(`/sessions/${sessionId}/segment`)
+      .send({ points: [{ x: 1, y: 1, label: 1 }] });
+    expect(firstSegment.status).toBe(200);
+
+    currentTime += 900; // 作成からは1800ms経過だが直近アクセスからは900ms（TTL未満）
+    const secondSegment = await request(app)
+      .post(`/sessions/${sessionId}/segment`)
+      .send({ points: [{ x: 1, y: 1, label: 1 }] });
+    expect(secondSegment.status).toBe(200);
+  });
+});
+
+describe("createServerApp（codex レビュー指摘対応: RGBAデータ長・画像寸法のバリデーション）", () => {
+  it("追加: width/heightがゼロ・負数・小数だと400を返す", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    const zero = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(2, 2), width: 0, height: 2 } });
+    expect(zero.status).toBe(400);
+
+    const negative = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(2, 2), width: -2, height: 2 } });
+    expect(negative.status).toBe(400);
+
+    const fractional = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(2, 2), width: 2.5, height: 2 } });
+    expect(fractional.status).toBe(400);
+  });
+
+  it("追加: width/heightが許容上限を超えると400を返す", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    const res = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(2, 2), width: 8193, height: 2 } });
+
+    expect(res.status).toBe(400);
+  });
+
+  it("追加: base64復号後のデータ長がwidth*height*4と一致しないと400を返す", async () => {
+    const { runtime } = createFakeSamRuntime();
+    const app = createServerApp(runtime);
+
+    // 2x2のRGBAなら16バイト必要だが、1x1分（4バイト）しか送らない
+    const res = await request(app)
+      .post("/sessions")
+      .send({ image: { data: makeTestImageBase64(1, 1), width: 2, height: 2 } });
+
+    expect(res.status).toBe(400);
+  });
+});
