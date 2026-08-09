@@ -4,6 +4,8 @@ import {
   buildCacheName,
   isExcludedFromAppShellCache,
   buildModelAssetPaths,
+  buildAllModelAssetPaths,
+  SELF_HOSTED_MODEL_IDS,
   WASM_RUNTIME_ASSET_PATHS,
   extractWorkerChunkUrls,
 } from "./cachePolicy";
@@ -95,6 +97,47 @@ describe("buildModelAssetPaths", () => {
     const paths = buildModelAssetPaths("other-model");
 
     expect(paths.every((path) => path.startsWith("/models/other-model/"))).toBe(true);
+  });
+});
+
+describe("SELF_HOSTED_MODEL_IDS / buildAllModelAssetPaths", () => {
+  // Case 7: 自前ホスティング済みモデル一覧（複数モデル追加後の precache 対象）の検証
+  it("Case 7a: includes both the default slimsam-77-uniform and the added slimsam-50-uniform", () => {
+    expect(SELF_HOSTED_MODEL_IDS).toEqual(
+      expect.arrayContaining(["slimsam-77-uniform", "slimsam-50-uniform"])
+    );
+  });
+
+  it("Case 7b: buildAllModelAssetPaths includes slimsam-50-uniform's asset paths", () => {
+    const paths = buildAllModelAssetPaths();
+
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "/models/slimsam-50-uniform/config.json",
+        "/models/slimsam-50-uniform/preprocessor_config.json",
+        "/models/slimsam-50-uniform/onnx/vision_encoder_quantized.onnx",
+        "/models/slimsam-50-uniform/onnx/prompt_encoder_mask_decoder_quantized.onnx",
+      ])
+    );
+  });
+
+  it("Case 7c: buildAllModelAssetPaths still includes the existing slimsam-77-uniform's asset paths (unchanged)", () => {
+    const paths = buildAllModelAssetPaths();
+
+    expect(paths).toEqual(
+      expect.arrayContaining([
+        "/models/slimsam-77-uniform/config.json",
+        "/models/slimsam-77-uniform/preprocessor_config.json",
+        "/models/slimsam-77-uniform/onnx/vision_encoder_quantized.onnx",
+        "/models/slimsam-77-uniform/onnx/prompt_encoder_mask_decoder_quantized.onnx",
+      ])
+    );
+  });
+
+  it("Case 7d: every generated path is cacheable per isCacheableAssetPath", () => {
+    const paths = buildAllModelAssetPaths();
+
+    expect(paths.every((path) => isCacheableAssetPath(path))).toBe(true);
   });
 });
 
