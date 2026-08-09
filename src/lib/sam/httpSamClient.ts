@@ -34,6 +34,14 @@ interface SegmentResponse {
 /** 大きな画像でも `String.fromCharCode` のスタックオーバーフローを避けるためのチャンクサイズ。 */
 const BASE64_CHUNK_SIZE = 0x8000;
 
+/**
+ * ローカル推論サーバー（`server/`）へ送信できる画像の上限（ピクセル数）。
+ * サーバー側の JSON ボディ上限（50MB、`server/src/app.ts` の `express.json({ limit: "50mb" })`）
+ * から逆算した安全マージン込みの値。RGBA（4 bytes/px）を base64 化すると約 4/3 倍になるため、
+ * 8,000,000 px の画像でも base64 後は約 40MB程度に収まる（codex レビュー指摘対応）。
+ */
+export const MAX_IMAGE_PIXELS_FOR_LOCAL_SERVER = 8_000_000;
+
 function bytesToBase64(bytes: Uint8ClampedArray | Uint8Array): string {
   let binary = "";
   for (let offset = 0; offset < bytes.length; offset += BASE64_CHUNK_SIZE) {
@@ -75,15 +83,29 @@ function decodeMask(mask: WireMaskResult): SamMaskResult {
  * - `onProgress()`: サーバー方式では進捗通知が無いため no-op
  */
 export function createHttpSamClient(baseUrl: string, modelId: string): SamWorkerClient {
+  // 末尾スラッシュを正規化する。除去しないと `${baseUrl}${path}` が `//health` のように
+  // なり Express のルートと一致せず接続に失敗する（codex レビュー指摘対応）。
+  const normalizedBaseUrl = baseUrl.replace(/\/+$/, "");
   let sessionId: string | null = null;
+
+  /**
+   * DELETE はレスポンスボディを持たない（204 No Content）ため、`response.json()` を呼ぶ
+   * `requestJson` は使わずベストエフォートで直接 fetch する。失敗しても呼び出し元の処理
+   * （新規セッション作成・terminate）は継続する。
+   */
+  function disposeSession(id: string): Promise<void> {
+    return fetch(`${normalizedBaseUrl}/sessions/${id}`, { method: "DELETE" })
+      .then(() => undefined)
+      .catch(() => undefined);
+  }
 
   async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
     let response: Response;
     try {
-      response = await fetch(`${baseUrl}${path}`, init);
+      response = await fetch(`${normalizedBaseUrl}${path}`, init);
     } catch {
       throw new Error(
-        `ローカル推論サーバー（${baseUrl}）に接続できません。サーバーが起動しているか確認するか、` +
+        `ローカル推論サーバー（${normalizedBaseUrl}）に接続できません。サーバーが起動しているか確認するか、` +
           "ブラウザ内蔵の実行方式に切り替えてください。"
       );
     }
@@ -133,6 +155,24 @@ export function createHttpSamClient(baseUrl: string, modelId: string): SamWorker
     },
 
     async setImage(image: SamImageInput): Promise<void> {
+      const pixelCount = image.width * image.height;
+      if (pixelCount > MAX_IMAGE_PIXELS_FOR_LOCAL_SERVER) {
+        const limitMp = (MAX_IMAGE_PIXELS_FOR_LOCAL_SERVER / 1_000_000).toFixed(0);
+        const actualMp = (pixelCount / 1_000_000).toFixed(1);
+        throw new Error(
+          `画像が大きすぎます。PCローカルサーバー方式では現在${limitMp}メガピクセル以下の` +
+            `画像のみ対応しています（選択した画像: 約${actualMp}メガピクセル）。`
+        );
+      }
+
+      // 別画像に切り替える際は、サーバー上に前回の embedding を残さないよう先に破棄する
+      // （codex レビュー指摘対応: 破棄せずに作り続けると TTL まで蓄積しメモリを圧迫する）。
+      if (sessionId) {
+        const previousSessionId = sessionId;
+        sessionId = null;
+        await disposeSession(previousSessionId);
+      }
+
       const response = await requestJson<SessionCreateResponse>("/sessions", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -167,9 +207,7 @@ export function createHttpSamClient(baseUrl: string, modelId: string): SamWorker
       const idToDispose = sessionId;
       sessionId = null;
       // terminate() は同期 API のためレスポンスを待たない（ベストエフォート）。
-      void fetch(`${baseUrl}/sessions/${idToDispose}`, { method: "DELETE" }).catch(
-        () => {}
-      );
+      void disposeSession(idToDispose);
     },
   };
 }
