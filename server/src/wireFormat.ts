@@ -1,0 +1,109 @@
+import type { SamImageInput, SamMaskResult, SegmentPoint } from "../../src/lib/sam/types";
+
+/**
+ * HTTP JSON ボディとドメイン型（`SamImageInput` / `SegmentPoint` / `SamMaskResult`）の
+ * 相互変換。バイト列（RGBA 画像・二値マスク）は base64 文字列としてやり取りする。
+ */
+
+export class RequestValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RequestValidationError";
+  }
+}
+
+function requireField(body: Record<string, unknown>, field: string): unknown {
+  if (!(field in body) || body[field] === undefined) {
+    throw new RequestValidationError(`missing required field: "${field}"`);
+  }
+  return body[field];
+}
+
+function requireNumber(value: unknown, field: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new RequestValidationError(`field "${field}" must be a finite number`);
+  }
+  return value;
+}
+
+function requireString(value: unknown, field: string): string {
+  if (typeof value !== "string") {
+    throw new RequestValidationError(`field "${field}" must be a string`);
+  }
+  return value;
+}
+
+export interface SessionCreateBody {
+  image: {
+    data: string; // base64 encoded RGBA bytes
+    width: number;
+    height: number;
+  };
+}
+
+export function decodeImagePayload(body: unknown): SamImageInput {
+  if (typeof body !== "object" || body === null) {
+    throw new RequestValidationError("request body must be a JSON object");
+  }
+  const image = requireField(body as Record<string, unknown>, "image");
+  if (typeof image !== "object" || image === null) {
+    throw new RequestValidationError('field "image" must be an object');
+  }
+  const imageBody = image as Record<string, unknown>;
+  const data = requireString(requireField(imageBody, "data"), "image.data");
+  const width = requireNumber(requireField(imageBody, "width"), "image.width");
+  const height = requireNumber(requireField(imageBody, "height"), "image.height");
+
+  const buffer = Buffer.from(data, "base64");
+  return {
+    data: new Uint8ClampedArray(buffer.buffer, buffer.byteOffset, buffer.byteLength),
+    width,
+    height,
+  };
+}
+
+export function decodePointsPayload(body: unknown): SegmentPoint[] {
+  if (typeof body !== "object" || body === null) {
+    throw new RequestValidationError("request body must be a JSON object");
+  }
+  const points = requireField(body as Record<string, unknown>, "points");
+  if (!Array.isArray(points)) {
+    throw new RequestValidationError('field "points" must be an array');
+  }
+
+  return points.map((point, index) => {
+    if (typeof point !== "object" || point === null) {
+      throw new RequestValidationError(`points[${index}] must be an object`);
+    }
+    const p = point as Record<string, unknown>;
+    const x = requireNumber(requireField(p, "x"), `points[${index}].x`);
+    const y = requireNumber(requireField(p, "y"), `points[${index}].y`);
+    const label = requireField(p, "label");
+    if (label !== 0 && label !== 1) {
+      throw new RequestValidationError(`points[${index}].label must be 0 or 1`);
+    }
+    return { x, y, label };
+  });
+}
+
+export interface WireMaskResult {
+  data: string; // base64 encoded Uint8Array (0/1 per pixel)
+  width: number;
+  height: number;
+  score: number;
+}
+
+export function encodeMask(mask: SamMaskResult): WireMaskResult {
+  return {
+    data: Buffer.from(mask.data.buffer, mask.data.byteOffset, mask.data.byteLength).toString(
+      "base64"
+    ),
+    width: mask.width,
+    height: mask.height,
+    score: mask.score,
+  };
+}
+
+export function encodeMasks(masks: SamMaskResult[]): WireMaskResult[] {
+  return masks.map(encodeMask);
+}
