@@ -59,13 +59,25 @@ function isBoxOverlay(
   return overlay.kind === "box";
 }
 
+/**
+ * マスクを overlay canvas へ描画する。`mask` は画像全体（`kind: "mask"`）とバウンディング
+ * ボックス範囲のみ（`kind: "box"` の `mask`、issue #49 codex レビュー指摘によりメモリ節約の
+ * ため部分マスク化）の両方をサポートする。`offsetX`/`offsetY`（元画像座標系）を渡すと、
+ * その位置にマスクを等倍（拡縮なし）で配置する。マスクの1ピクセルは常に元画像の1ピクセルに
+ * 対応するため、canvas のサイズに合わせて引き伸ばす必要はない。
+ */
 function drawMaskLikeOverlay(
   ctx: CanvasRenderingContext2D,
-  canvas: HTMLCanvasElement,
   mask: { data: Uint8Array; width: number; height: number },
   score: number,
-  color: { r: number; g: number; b: number; a: number }
+  color: { r: number; g: number; b: number; a: number },
+  offsetX = 0,
+  offsetY = 0
 ): void {
+  if (mask.width <= 0 || mask.height <= 0) {
+    return;
+  }
+
   const pixels = maskToOverlayPixels({ ...mask, score }, color);
   const overlayImageData = ctx.createImageData(pixels.width, pixels.height);
   overlayImageData.data.set(pixels.data);
@@ -76,7 +88,7 @@ function drawMaskLikeOverlay(
   const offCtx = offscreen.getContext("2d");
   if (offCtx) {
     offCtx.putImageData(overlayImageData, 0, 0);
-    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+    ctx.drawImage(offscreen, offsetX, offsetY);
   }
 }
 
@@ -114,7 +126,6 @@ export function ModelLabResultView({
       if (isMaskOverlay(overlay)) {
         drawMaskLikeOverlay(
           ctx,
-          canvas,
           { data: overlay.data, width: overlay.width, height: overlay.height },
           overlay.score ?? 0,
           MASK_COLOR
@@ -127,10 +138,11 @@ export function ModelLabResultView({
         if (overlay.mask) {
           drawMaskLikeOverlay(
             ctx,
-            canvas,
             overlay.mask,
             overlay.score ?? 0,
-            isHighlighted ? BOX_HIGHLIGHT_COLOR : BOX_COLOR
+            isHighlighted ? BOX_HIGHLIGHT_COLOR : BOX_COLOR,
+            overlay.mask.x,
+            overlay.mask.y
           );
         }
         ctx.strokeStyle = isHighlighted ? "#facc15" : "rgba(255, 255, 255, 0.85)";

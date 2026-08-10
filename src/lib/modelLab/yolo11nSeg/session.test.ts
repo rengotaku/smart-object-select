@@ -93,8 +93,12 @@ describe("createYolo11nSegSession", () => {
     expect(result[0].classId).toBe(0);
     expect(result[0].label).toBe("person");
     expect(result[0].score).toBeCloseTo(0.95, 5);
-    expect(result[0].mask.width).toBe(8);
-    expect(result[0].mask.height).toBe(8);
+    // マスクは画像全体(8x8)ではなく、ボックス範囲のみを保持する（issue #49 codex レビュー指摘）。
+    // 640空間ボックス(270,270,100,100)をスケール80で元画像(8x8)へ写像すると (3,3)-(5,5) になる。
+    expect(result[0].mask.x).toBe(3);
+    expect(result[0].mask.y).toBe(3);
+    expect(result[0].mask.width).toBe(2);
+    expect(result[0].mask.height).toBe(2);
   });
 
   it("出力テンソルの名前が異なっていても shape が一致すれば動作する（配布元差異対応）", async () => {

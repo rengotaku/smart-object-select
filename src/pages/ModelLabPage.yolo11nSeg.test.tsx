@@ -43,6 +43,8 @@ const DETECTIONS: Yolo11nSegDetection[] = [
       ]),
       width: 4,
       height: 4,
+      x: 0,
+      y: 0,
     },
   },
   {
@@ -71,6 +73,8 @@ const DETECTIONS: Yolo11nSegDetection[] = [
       ]),
       width: 4,
       height: 4,
+      x: 0,
+      y: 0,
     },
   },
 ];

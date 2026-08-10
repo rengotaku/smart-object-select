@@ -217,7 +217,7 @@ describe("ModelLabResultView", () => {
           width: 1,
           height: 1,
           score: 0.9,
-          mask: { data: new Uint8Array([1]), width: 1, height: 1 },
+          mask: { data: new Uint8Array([1]), width: 1, height: 1, x: 0, y: 0 },
         },
       ],
     };

@@ -185,6 +185,9 @@ describe("decodeInstanceMask", () => {
       inputSize: 8,
     });
 
+    // ボックスが画像全体(0,0,8,8)のため、マスクも画像全体サイズになる
+    expect(mask.x).toBe(0);
+    expect(mask.y).toBe(0);
     expect(mask.width).toBe(8);
     expect(mask.height).toBe(8);
     // 元画像の左半分(x=0..3)が前景、右半分(x=4..7)が背景になるはず
@@ -198,7 +201,7 @@ describe("decodeInstanceMask", () => {
     }
   });
 
-  it("ボックス外のピクセルは常に0", () => {
+  it("ボックス範囲のみのマスクを返す（画像全体は保持しない）", () => {
     const maskProtoSize = 2;
     const proto = new Float32Array(1 * maskProtoSize * maskProtoSize).fill(10); // 全て強い前景ロジット
     const maskCoeffs = new Float32Array([1]);
@@ -210,10 +213,14 @@ describe("decodeInstanceMask", () => {
       inputSize: 8,
     });
 
-    // ボックス外(0,0)は0のまま
-    expect(mask.data[0 * 8 + 0]).toBe(0);
-    // ボックス内(2,2)は1
-    expect(mask.data[2 * 8 + 2]).toBe(1);
+    // マスクデータはボックス範囲(2,2,2,2)分のみ確保される（画像全体の8x8=64バイトではない）
+    expect(mask.x).toBe(2);
+    expect(mask.y).toBe(2);
+    expect(mask.width).toBe(2);
+    expect(mask.height).toBe(2);
+    expect(mask.data.length).toBe(4);
+    // ボックス内は全て前景（強い前景ロジットのため）
+    expect(Array.from(mask.data)).toEqual([1, 1, 1, 1]);
   });
 });
 
@@ -254,11 +261,13 @@ describe("decodeYoloOutputs", () => {
     expect(result[0].label).toBe("person");
     expect(result[0].score).toBeCloseTo(0.9, 5);
     expect(result[0].box).toEqual({ x: 2, y: 2, width: 4, height: 4 });
-    expect(result[0].mask.width).toBe(8);
-    expect(result[0].mask.height).toBe(8);
-    // ボックス内(3,3)は前景
-    expect(result[0].mask.data[3 * 8 + 3]).toBe(1);
-    // ボックス外(0,0)は背景
-    expect(result[0].mask.data[0]).toBe(0);
+    // マスクはボックス範囲(2,2,4,4)のみ保持し、画像全体(8x8)は保持しない
+    expect(result[0].mask.x).toBe(2);
+    expect(result[0].mask.y).toBe(2);
+    expect(result[0].mask.width).toBe(4);
+    expect(result[0].mask.height).toBe(4);
+    expect(result[0].mask.data.length).toBe(16);
+    // 元画像(3,3)はボックス左上(2,2)からのローカル座標(1,1)に対応し、前景
+    expect(result[0].mask.data[1 * 4 + 1]).toBe(1);
   });
 });

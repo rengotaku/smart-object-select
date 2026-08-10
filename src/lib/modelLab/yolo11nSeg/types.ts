@@ -14,12 +14,17 @@ export interface Yolo11nSegDetection {
     height: number;
   };
   /**
-   * インスタンスの二値マスク（元画像と同じ width/height。1バイト1ピクセル、0 or 1）。
-   * バウンディングボックス外は常に 0（Ultralytics のボックスクロップと同じ挙動）。
+   * インスタンスの二値マスク（1バイト1ピクセル、0 or 1）。メモリ効率のため元画像全体ではなく
+   * バウンディングボックス範囲のみを保持する（`width`/`height` はボックス範囲のサイズ、
+   * `x`/`y` は元画像座標系での左上オフセット）。
    */
   mask: {
     data: Uint8Array;
     width: number;
     height: number;
+    /** 元画像座標系での mask.data の左上オフセット x */
+    x: number;
+    /** 元画像座標系での mask.data の左上オフセット y */
+    y: number;
   };
 }

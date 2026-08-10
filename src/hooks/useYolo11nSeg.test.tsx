@@ -13,7 +13,7 @@ const DEFAULT_DETECTIONS: Yolo11nSegDetection[] = [
     label: "person",
     score: 0.9,
     box: { x: 0, y: 0, width: 2, height: 2 },
-    mask: { data: new Uint8Array([1, 1, 1, 1]), width: 2, height: 2 },
+    mask: { data: new Uint8Array([1, 1, 1, 1]), width: 2, height: 2, x: 0, y: 0 },
   },
 ];
 

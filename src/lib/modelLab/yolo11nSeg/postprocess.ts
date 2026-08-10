@@ -151,13 +151,18 @@ export interface DecodeInstanceMaskOptions {
 }
 
 /**
- * 1インスタンス分のマスクをデコードし、元画像サイズの二値マスクへ変換する。
+ * 1インスタンス分のマスクをデコードし、バウンディングボックス範囲のみの二値マスクへ変換する。
  *
  * マスクプロトタイプ（`[maskProtoChannels, maskProtoSize, maskProtoSize]`）と
  * マスク係数（長さ maskProtoChannels）の内積 → sigmoid → 閾値二値化、という
  * Ultralytics の `process_mask` と同じ手順を、バウンディングボックス内の元画像ピクセルに
  * 対してのみ計算する（ボックス外は常に0。Ultralytics もマスクをボックスでクロップするため
  * 同じ結果になり、かつ全画面走査より大幅に高速）。
+ *
+ * 返すマスクデータは元画像全体のサイズ（`originalWidth * originalHeight`）ではなく、
+ * バウンディングボックス範囲のみを保持する（`width` x `height`、`x`/`y` は元画像座標系での
+ * 左上オフセット）。高解像度画像で検出数が多い場合、フル解像度マスクを検出ごとに確保すると
+ * メモリを圧迫し Worker→メインスレッド間の転送量も膨らむため（issue #49 codex レビュー指摘）。
  */
 export function decodeInstanceMask(
   protoData: Float32Array,
@@ -167,7 +172,7 @@ export function decodeInstanceMask(
   originalWidth: number,
   originalHeight: number,
   options: DecodeInstanceMaskOptions = {}
-): { data: Uint8Array; width: number; height: number } {
+): { data: Uint8Array; width: number; height: number; x: number; y: number } {
   const maskProtoSize = options.maskProtoSize ?? YOLO11N_SEG_MASK_PROTO_SIZE;
   const inputSize = options.inputSize ?? YOLO11N_SEG_INPUT_SIZE;
   const maskThreshold = options.maskThreshold ?? YOLO11N_SEG_MASK_THRESHOLD;
@@ -175,17 +180,20 @@ export function decodeInstanceMask(
   const protoScale = maskProtoSize / inputSize;
   const protoPixelCount = maskProtoSize * maskProtoSize;
 
-  const data = new Uint8Array(originalWidth * originalHeight);
-
   const boxOrig = mapBoxToOriginal(box640, transform, originalWidth, originalHeight);
   const x0 = Math.max(0, Math.floor(boxOrig.x));
   const y0 = Math.max(0, Math.floor(boxOrig.y));
   const x1 = Math.min(originalWidth, Math.ceil(boxOrig.x + boxOrig.width));
   const y1 = Math.min(originalHeight, Math.ceil(boxOrig.y + boxOrig.height));
 
+  const width = Math.max(0, x1 - x0);
+  const height = Math.max(0, y1 - y0);
+  const data = new Uint8Array(width * height);
+
   for (let oy = y0; oy < y1; oy++) {
     const iy = oy * transform.scale + transform.padY;
     const py = Math.min(maskProtoSize - 1, Math.max(0, Math.floor(iy * protoScale)));
+    const localY = oy - y0;
 
     for (let ox = x0; ox < x1; ox++) {
       const ix = ox * transform.scale + transform.padX;
@@ -198,12 +206,12 @@ export function decodeInstanceMask(
       }
       const probability = 1 / (1 + Math.exp(-logit));
       if (probability > maskThreshold) {
-        data[oy * originalWidth + ox] = 1;
+        data[localY * width + (ox - x0)] = 1;
       }
     }
   }
 
-  return { data, width: originalWidth, height: originalHeight };
+  return { data, width, height, x: x0, y: y0 };
 }
 
 export interface DecodeYoloOutputsOptions
