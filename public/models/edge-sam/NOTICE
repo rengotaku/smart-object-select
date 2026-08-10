@@ -1,0 +1,92 @@
+smart-object-select bundles model files derived from the following third-party model.
+
+Model: edge-sam
+Source: https://huggingface.co/tonyyang2000/EdgeSAM
+  (ONNX export of EdgeSAM-3x, published by tonyyang2000)
+Original model: https://github.com/chongzhou96/EdgeSAM
+  (EdgeSAM weights, published by S-Lab, Nanyang Technological University)
+
+License:
+  This bundle is subject to two licenses, and the more restrictive one governs actual use:
+
+  1. The original EdgeSAM model (the weights these ONNX files were exported from) is
+     licensed under the S-Lab License 1.0
+     (https://github.com/chongzhou96/EdgeSAM/blob/master/LICENSE), which is a
+     NON-COMMERCIAL license. It permits redistribution and use only "for non-commercial
+     purpose"; commercial use requires contacting the original contributors. The full
+     license text is reproduced below.
+
+  2. The tonyyang2000/EdgeSAM Hugging Face repository that produced this ONNX export
+     additionally declares its own contribution under the MIT License (see the
+     repository's model card metadata: https://huggingface.co/tonyyang2000/EdgeSAM/raw/main/README.md).
+     This MIT declaration covers only that repository's own wrapper contribution
+     (the ONNX export/handler code) and does NOT relicense the underlying EdgeSAM model
+     weights, which remain governed by the S-Lab License 1.0 above (a downstream
+     redistributor cannot unilaterally grant broader rights than it received from the
+     original copyright holder).
+
+  IMPORTANT (differs from public/models/mobile-sam/NOTICE): unlike MobileSAM's
+  Apache-2.0-licensed original weights, EdgeSAM's original weights are NON-COMMERCIAL
+  ONLY under the S-Lab License 1.0. This bundle is included here for the Model Lab
+  verification/comparison page (issue #46/#48, parent #45), which is a non-commercial,
+  internal evaluation use case. Any commercial use of smart-object-select (or any
+  redistribution of these files) must independently confirm compliance with the S-Lab
+  License 1.0's non-commercial restriction, or contact the EdgeSAM contributors for a
+  commercial license.
+
+Files included (unmodified from the upstream repository):
+  - edge_sam_3x_encoder.onnx
+  - edge_sam_3x_decoder.onnx
+
+Changes made:
+  - No modification was made to the file contents. Only the ONNX weight files (not the
+    app.py/handler.py/requirements.txt also published in that repository) actually
+    loaded by this application were selected and copied verbatim into
+    public/models/edge-sam/ so that smart-object-select can serve the model from its
+    own origin instead of fetching it from the Hugging Face Hub at runtime.
+
+--- S-Lab License 1.0 (original EdgeSAM weights, https://github.com/chongzhou96/EdgeSAM) ---
+
+S-Lab License 1.0
+
+Copyright 2022 S-Lab
+
+Redistribution and use for non-commercial purpose in source and
+binary forms, with or without modification, are permitted provided
+that the following conditions are met:
+
+1. Redistributions of source code must retain the above copyright
+   notice, this list of conditions and the following disclaimer.
+
+2. Redistributions in binary form must reproduce the above copyright
+   notice, this list of conditions and the following disclaimer in
+   the documentation and/or other materials provided with the
+   distribution.
+
+3. Neither the name of the copyright holder nor the names of its
+   contributors may be used to endorse or promote products derived
+   from this software without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+In the event that redistribution and/or use for commercial purpose in
+source or binary forms, with or without modification is required,
+please contact the contributor(s) of the work.
+
+--- MIT License (tonyyang2000/EdgeSAM ONNX export wrapper contribution) ---
+
+license: mit
+(declared in repository card metadata:
+https://huggingface.co/tonyyang2000/EdgeSAM/raw/main/README.md;
+no separate LICENSE file with copyright holder text was published in that repository
+as of the date these files were fetched)

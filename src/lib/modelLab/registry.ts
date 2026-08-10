@@ -22,6 +22,10 @@ export interface ModelLabDescriptor {
  * "mobile-sam"（issue #47）: `src/lib/modelLab/mobileSam/` が提供する
  * `onnxruntime-web` 直接実行のセッションを `useMobileSam`（`src/hooks/useMobileSam.ts`）
  * 経由で使う。id はその2箇所と一致させること。
+ *
+ * "edge-sam"（issue #48）: `src/lib/modelLab/edgeSam/` が提供する
+ * `onnxruntime-web` 直接実行のセッションを `useEdgeSam`（`src/hooks/useEdgeSam.ts`）
+ * 経由で使う。id はその2箇所と一致させること。
  */
 export const ModelLabRegistry: ModelLabDescriptor[] = [
   {
@@ -30,5 +34,12 @@ export const ModelLabRegistry: ModelLabDescriptor[] = [
     description:
       "軽量版SAM（TinyViTベースのエンコーダ）。onnxruntime-web を直接実行し、" +
       "点クリックでマスクを推論する（issue #34/ADR 0006 で見送り、issue #47 で検証用に統合）。",
+  },
+  {
+    id: "edge-sam",
+    name: "EdgeSAM",
+    description:
+      "軽量版SAM（RepViTベースのエンコーダ）。onnxruntime-web を直接実行し、" +
+      "点クリックでマスクを推論する（issue #34/ADR 0006 で見送り、issue #48 で検証用に統合）。",
   },
 ];
