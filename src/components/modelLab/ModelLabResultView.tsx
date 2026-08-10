@@ -59,22 +59,35 @@ function isBoxOverlay(
   return overlay.kind === "box";
 }
 
+/** `drawMaskLikeOverlay` の描画先矩形（canvas 上の配置とサイズ）。 */
+interface MaskDrawDestination {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /**
- * マスクを overlay canvas へ描画する。`mask` は画像全体（`kind: "mask"`）とバウンディング
- * ボックス範囲のみ（`kind: "box"` の `mask`、issue #49 codex レビュー指摘によりメモリ節約の
- * ため部分マスク化）の両方をサポートする。`offsetX`/`offsetY`（元画像座標系）を渡すと、
- * その位置にマスクを等倍（拡縮なし）で配置する。マスクの1ピクセルは常に元画像の1ピクセルに
- * 対応するため、canvas のサイズに合わせて引き伸ばす必要はない。
+ * マスクを overlay canvas へ描画する。呼び出し側が渡す `dest` で描画方式が変わる:
+ *
+ * - `kind: "mask"`（MobileSAM/EdgeSAM。固定サイズ、例: EdgeSAM は 256×256 固定で画像本体とは
+ *   サイズが異なる）→ `dest` を `{ x: 0, y: 0, width: canvas.width, height: canvas.height }` にし、
+ *   画像全体へ拡大描画する（マスクの座標系が画像そのものと異なりうるため、拡縮描画が必須）
+ * - `kind: "box"` の `mask`（YOLO11n-seg。バウンディングボックス範囲のみ、元画像と同じ
+ *   ピクセル座標系）→ `dest` を `{ x: mask.x, y: mask.y, width: mask.width, height: mask.height }`
+ *   にし、拡縮なしで等倍配置する（マスクの1ピクセルが元画像の1ピクセルに対応するため）
+ *
+ * 2種類のマスクは座標系の意味が異なるため、呼び出し側で `dest` を明示的に組み立てて渡す
+ * （関数内で `kind` 分岐はしない）。
  */
 function drawMaskLikeOverlay(
   ctx: CanvasRenderingContext2D,
   mask: { data: Uint8Array; width: number; height: number },
   score: number,
   color: { r: number; g: number; b: number; a: number },
-  offsetX = 0,
-  offsetY = 0
+  dest: MaskDrawDestination
 ): void {
-  if (mask.width <= 0 || mask.height <= 0) {
+  if (mask.width <= 0 || mask.height <= 0 || dest.width <= 0 || dest.height <= 0) {
     return;
   }
 
@@ -88,7 +101,7 @@ function drawMaskLikeOverlay(
   const offCtx = offscreen.getContext("2d");
   if (offCtx) {
     offCtx.putImageData(overlayImageData, 0, 0);
-    ctx.drawImage(offscreen, offsetX, offsetY);
+    ctx.drawImage(offscreen, dest.x, dest.y, dest.width, dest.height);
   }
 }
 
@@ -124,11 +137,14 @@ export function ModelLabResultView({
     const overlays = result?.overlays ?? [];
     overlays.forEach((overlay, index) => {
       if (isMaskOverlay(overlay)) {
+        // 画像全体をカバーする固定サイズマスク（MobileSAM/EdgeSAM）。マスク自身の座標系は
+        // 画像本体と異なりうる（EdgeSAM は 256×256 固定）ため、canvas 全体へ拡大描画する。
         drawMaskLikeOverlay(
           ctx,
           { data: overlay.data, width: overlay.width, height: overlay.height },
           overlay.score ?? 0,
-          MASK_COLOR
+          MASK_COLOR,
+          { x: 0, y: 0, width: canvas.width, height: canvas.height }
         );
         return;
       }
@@ -136,13 +152,19 @@ export function ModelLabResultView({
       if (isBoxOverlay(overlay)) {
         const isHighlighted = index === highlightedOverlayIndex;
         if (overlay.mask) {
+          // バウンディングボックス範囲のみの部分マスク（YOLO11n-seg）。元画像と同じ
+          // ピクセル座標系のため、拡縮せず mask.x/mask.y の位置に等倍配置する。
           drawMaskLikeOverlay(
             ctx,
             overlay.mask,
             overlay.score ?? 0,
             isHighlighted ? BOX_HIGHLIGHT_COLOR : BOX_COLOR,
-            overlay.mask.x,
-            overlay.mask.y
+            {
+              x: overlay.mask.x,
+              y: overlay.mask.y,
+              width: overlay.mask.width,
+              height: overlay.mask.height,
+            }
           );
         }
         ctx.strokeStyle = isHighlighted ? "#facc15" : "rgba(255, 255, 255, 0.85)";
