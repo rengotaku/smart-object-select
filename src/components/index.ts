@@ -4,3 +4,7 @@ export { SegmentCanvas, type SegmentCanvasProps } from "./segment/SegmentCanvas"
 export { ExportBar, type ExportBarProps } from "./segment/ExportBar";
 export { LayerPanel, type LayerPanelProps } from "./segment/LayerPanel";
 export { CandidatePicker, type CandidatePickerProps } from "./segment/CandidatePicker";
+export {
+  ModelLabResultView,
+  type ModelLabResultViewProps,
+} from "./modelLab/ModelLabResultView";
