@@ -27,13 +27,13 @@ describe("ModelLabPage", () => {
     expect(screen.getByTestId("file-input")).toBeInTheDocument();
   });
 
-  it("モデル切り替えUIをレンダリングする（選択肢が空でもプレースホルダを表示する）", () => {
+  it("モデル切り替えUIをレンダリングする（MobileSAM が選択肢に含まれる。issue #47）", () => {
     render(<ModelLabPage />);
 
     const select = screen.getByLabelText("モデル") as HTMLSelectElement;
     expect(select).toBeInTheDocument();
-    expect(select).toBeDisabled();
-    expect(screen.getByText("検証可能なモデルはまだありません")).toBeInTheDocument();
+    expect(select).not.toBeDisabled();
+    expect(screen.getByText("MobileSAM")).toBeInTheDocument();
   });
 
   it("画像をアップロードすると実行結果表示エリアにプレビューが出る", async () => {

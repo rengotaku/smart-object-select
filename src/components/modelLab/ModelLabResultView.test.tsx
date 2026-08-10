@@ -1,5 +1,5 @@
-import { render, screen } from "@testing-library/react";
-import { describe, it, expect } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ModelLabResultView } from "./ModelLabResultView";
 import type { LoadedImage } from "@/hooks";
 import type { ModelLabResult } from "@/lib/modelLab";
@@ -12,6 +12,19 @@ const image: LoadedImage = {
 };
 
 describe("ModelLabResultView", () => {
+  beforeEach(() => {
+    HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
+      drawImage: vi.fn(),
+      putImageData: vi.fn(),
+      clearRect: vi.fn(),
+      createImageData: vi.fn((w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+        width: w,
+        height: h,
+      })),
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+  });
+
   it("画像が無いとき空状態を表示する", () => {
     render(<ModelLabResultView image={null} />);
 
@@ -40,6 +53,104 @@ describe("ModelLabResultView", () => {
     render(<ModelLabResultView image={image} result={result} />);
 
     expect(screen.getByTestId("model-lab-overlay-layer")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-lab-result-empty")).not.toBeInTheDocument();
+  });
+
+  it("kind: mask のオーバーレイがあるとき overlay canvas に描画する", () => {
+    const drawImage = vi.fn();
+    HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
+      drawImage,
+      putImageData: vi.fn(),
+      clearRect: vi.fn(),
+      createImageData: vi.fn((w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+        width: w,
+        height: h,
+      })),
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const result: ModelLabResult = {
+      modelId: "mobile-sam",
+      overlays: [
+        {
+          kind: "mask",
+          data: new Uint8Array([1]),
+          width: 1,
+          height: 1,
+          score: 0.9,
+        },
+      ],
+    };
+    render(<ModelLabResultView image={image} result={result} />);
+
+    expect(drawImage).toHaveBeenCalled();
+  });
+
+  it("onImageClick が渡っているとき画像クリックで元画像座標を通知する", () => {
+    const onImageClick = vi.fn();
+    const largeImage: LoadedImage = {
+      data: new Uint8ClampedArray(1600 * 1200 * 4),
+      width: 1600,
+      height: 1200,
+      objectUrl: "blob:large-image",
+    };
+
+    render(<ModelLabResultView image={largeImage} onImageClick={onImageClick} />);
+
+    const preview = screen.getByTestId("model-lab-preview-image");
+    preview.getBoundingClientRect = vi.fn().mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 400,
+      height: 300,
+      right: 400,
+      bottom: 300,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    });
+
+    fireEvent.click(preview, { clientX: 200, clientY: 150 });
+
+    // rect 400x300, image 1600x1200 -> scale x4: (200,150) -> (800,600)
+    expect(onImageClick).toHaveBeenCalledWith(800, 600);
+  });
+
+  it("onImageClick 未指定のとき画像をクリックしても何も起きない", () => {
+    render(<ModelLabResultView image={image} />);
+
+    const preview = screen.getByTestId("model-lab-preview-image");
+    expect(() => fireEvent.click(preview)).not.toThrow();
+  });
+
+  it("isBusy のとき処理中インジケータを表示し、クリックしても onImageClick を呼ばない", () => {
+    const onImageClick = vi.fn();
+    render(<ModelLabResultView image={image} onImageClick={onImageClick} isBusy />);
+
+    expect(screen.getByTestId("model-lab-processing")).toBeInTheDocument();
+    expect(screen.queryByTestId("model-lab-click-hint")).not.toBeInTheDocument();
+
+    const preview = screen.getByTestId("model-lab-preview-image");
+    preview.getBoundingClientRect = vi.fn().mockReturnValue({
+      left: 0,
+      top: 0,
+      width: 1,
+      height: 1,
+      right: 1,
+      bottom: 1,
+      x: 0,
+      y: 0,
+      toJSON: () => {},
+    });
+    fireEvent.click(preview, { clientX: 0, clientY: 0 });
+
+    expect(onImageClick).not.toHaveBeenCalled();
+  });
+
+  it("onImageClick があるとき、クリックを促すヒントを表示する", () => {
+    render(<ModelLabResultView image={image} onImageClick={vi.fn()} />);
+
+    expect(screen.getByTestId("model-lab-click-hint")).toBeInTheDocument();
     expect(screen.queryByTestId("model-lab-result-empty")).not.toBeInTheDocument();
   });
 });

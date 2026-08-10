@@ -18,6 +18,17 @@ export interface ModelLabDescriptor {
  *
  * 後続 sub-issue はこの配列に `ModelLabDescriptor` を追加するだけで、
  * `ModelLabPage` のモデル切り替え `<select>` に選択肢が増える。
- * 本 sub-issue（土台構築）の時点では空配列。
+ *
+ * "mobile-sam"（issue #47）: `src/lib/modelLab/mobileSam/` が提供する
+ * `onnxruntime-web` 直接実行のセッションを `useMobileSam`（`src/hooks/useMobileSam.ts`）
+ * 経由で使う。id はその2箇所と一致させること。
  */
-export const ModelLabRegistry: ModelLabDescriptor[] = [];
+export const ModelLabRegistry: ModelLabDescriptor[] = [
+  {
+    id: "mobile-sam",
+    name: "MobileSAM",
+    description:
+      "軽量版SAM（TinyViTベースのエンコーダ）。onnxruntime-web を直接実行し、" +
+      "点クリックでマスクを推論する（issue #34/ADR 0006 で見送り、issue #47 で検証用に統合）。",
+  },
+];
