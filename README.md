@@ -30,3 +30,14 @@ CI workflow is at `.github/workflows/ci.yml`.
 ```bash
 make ci
 ```
+
+## License
+
+This repository is licensed under the GNU Affero General Public License v3.0
+(AGPL-3.0). See [`LICENSE`](LICENSE) for the full text.
+
+Some bundled model assets under `public/models/` are derived from third-party
+models with their own licenses (which may differ from this repository's
+AGPL-3.0, e.g. Apache-2.0, non-commercial-only, or also AGPL-3.0). See the
+`NOTICE` file alongside each model directory (e.g.
+`public/models/yolo11n-seg/NOTICE`) for details.

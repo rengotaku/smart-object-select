@@ -31,6 +31,20 @@ export interface ModelLabBoxOverlay {
   height: number;
   label?: string;
   score?: number;
+  /**
+   * インスタンスの二値マスク（issue #49, YOLO11n-seg で実装）。メモリ効率のため元画像全体
+   * ではなくバウンディングボックス範囲のみを保持する（`width`/`height` はボックス範囲の
+   * サイズ、`x`/`y` は元画像座標系での左上オフセット。`kind: "mask"` の
+   * `ModelLabMaskOverlay` は常に画像全体を保持するため形式が異なる点に注意）。
+   * 全自動検出系モデルの中にはボックスのみを返すものもあるため任意フィールドとする。
+   */
+  mask?: {
+    data: Uint8Array;
+    width: number;
+    height: number;
+    x: number;
+    y: number;
+  };
 }
 
 export type ModelLabOverlay = ModelLabMaskOverlay | ModelLabBoxOverlay;

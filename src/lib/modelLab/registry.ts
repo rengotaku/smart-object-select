@@ -26,6 +26,12 @@ export interface ModelLabDescriptor {
  * "edge-sam"（issue #48）: `src/lib/modelLab/edgeSam/` が提供する
  * `onnxruntime-web` 直接実行のセッションを `useEdgeSam`（`src/hooks/useEdgeSam.ts`）
  * 経由で使う。id はその2箇所と一致させること。
+ *
+ * "yolo11n-seg"（issue #49）: `src/lib/modelLab/yolo11nSeg/` が提供する
+ * `onnxruntime-web` 直接実行のセッションを `useYolo11nSeg`（`src/hooks/useYolo11nSeg.ts`）
+ * 経由で使う。id はその2箇所と一致させること。MobileSAM/EdgeSAM とは異なり、点クリックの
+ * 代わりに画像アップロード時の全自動検出＋クリックでのインスタンス選択（ハイライト）という
+ * インタラクションを取る（親 #45「未確定の論点」を issue #49 で解決）。
  */
 export const ModelLabRegistry: ModelLabDescriptor[] = [
   {
@@ -41,5 +47,13 @@ export const ModelLabRegistry: ModelLabDescriptor[] = [
     description:
       "軽量版SAM（RepViTベースのエンコーダ）。onnxruntime-web を直接実行し、" +
       "点クリックでマスクを推論する（issue #34/ADR 0006 で見送り、issue #48 で検証用に統合）。",
+  },
+  {
+    id: "yolo11n-seg",
+    name: "YOLO11n-seg",
+    description:
+      "COCO80クラス固定の全自動インスタンスセグメンテーション。任意物体は選べない閉集合検出器。" +
+      "画像アップロードで全インスタンスを一括検出し、クリックで該当インスタンスをハイライトする" +
+      "（issue #49 で検証用に統合。ライセンス: AGPL-3.0）。",
   },
 ];
