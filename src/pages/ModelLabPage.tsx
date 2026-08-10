@@ -6,12 +6,16 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { useMobileSam } from "@/hooks/useMobileSam";
+import { useEdgeSam } from "@/hooks/useEdgeSam";
 import type { LoadedImage } from "@/hooks";
 import { ModelLabRegistry, type ModelLabResult } from "@/lib/modelLab";
 import type { MobileSamWorkerClient } from "@/lib/modelLab/mobileSam";
+import type { EdgeSamWorkerClient } from "@/lib/modelLab/edgeSam";
 
 /** MobileSAM（issue #47）の `ModelLabDescriptor.id`。registry.ts のエントリと一致させる。 */
 const MOBILE_SAM_MODEL_ID = "mobile-sam";
+/** EdgeSAM（issue #48）の `ModelLabDescriptor.id`。registry.ts のエントリと一致させる。 */
+const EDGE_SAM_MODEL_ID = "edge-sam";
 
 export interface ModelLabPageProps {
   /**
@@ -20,6 +24,12 @@ export interface ModelLabPageProps {
    * （`mobileSam.worker.ts` を起動する実クライアント）が使われる。
    */
   createMobileSamClient?: () => MobileSamWorkerClient;
+  /**
+   * テストから fake EdgeSamWorkerClient を注入するためのフック（`createMobileSamClient`
+   * と同じ役割）。省略時は `useEdgeSam` の既定（`edgeSam.worker.ts` を起動する
+   * 実クライアント）が使われる。
+   */
+  createEdgeSamClient?: () => EdgeSamWorkerClient;
 }
 
 /**
@@ -43,10 +53,15 @@ function revokeObjectUrl(url: string | undefined) {
  *
  * MobileSAM（issue #47）: `useMobileSam`（`onnxruntime-web` を直接呼ぶ検証専用実装、
  * `src/lib/modelLab/mobileSam/`）を使い、点クリック→マスク表示のインタラクションで動作する。
- * 他モデル（EdgeSAM/YOLO11n-seg/FastSAM 等）は後続 sub-issue が同じ拡張ポイント
+ * EdgeSAM（issue #48）: `useEdgeSam`（`src/lib/modelLab/edgeSam/`）を使い、同じ
+ * 点クリック→マスク表示のインタラクションで動作する。
+ * 他モデル（YOLO11n-seg/FastSAM 等）は後続 sub-issue が同じ拡張ポイント
  * （ModelLabRegistry への追加 + このページでの switch）で追加していく想定。
  */
-export function ModelLabPage({ createMobileSamClient }: ModelLabPageProps = {}) {
+export function ModelLabPage({
+  createMobileSamClient,
+  createEdgeSamClient,
+}: ModelLabPageProps = {}) {
   const [image, setImageState] = useState<LoadedImage | null>(null);
   // ModelLabRegistry にモデルが1件でも登録されていれば、その先頭を初期選択にする。
   // 空文字のまま初期化すると、レジストリが1件だけの場合ブラウザは先頭 <option> を
@@ -61,6 +76,7 @@ export function ModelLabPage({ createMobileSamClient }: ModelLabPageProps = {}) 
   const imageRef = useRef<LoadedImage | null>(null);
 
   const isMobileSamActive = selectedModelId === MOBILE_SAM_MODEL_ID;
+  const isEdgeSamActive = selectedModelId === EDGE_SAM_MODEL_ID;
   const {
     status: mobileSamStatus,
     error: mobileSamError,
@@ -68,6 +84,13 @@ export function ModelLabPage({ createMobileSamClient }: ModelLabPageProps = {}) 
     segmentAtPoint: segmentMobileSamAtPoint,
     reset: resetMobileSam,
   } = useMobileSam({ createClient: createMobileSamClient });
+  const {
+    status: edgeSamStatus,
+    error: edgeSamError,
+    mask: edgeSamMask,
+    segmentAtPoint: segmentEdgeSamAtPoint,
+    reset: resetEdgeSam,
+  } = useEdgeSam({ createClient: createEdgeSamClient });
 
   useEffect(() => {
     return () => {
@@ -78,7 +101,8 @@ export function ModelLabPage({ createMobileSamClient }: ModelLabPageProps = {}) 
   // モデル・画像を切り替えたら、前回の推論結果を引きずらないようクリアする。
   useEffect(() => {
     resetMobileSam();
-  }, [selectedModelId, image, resetMobileSam]);
+    resetEdgeSam();
+  }, [selectedModelId, image, resetMobileSam, resetEdgeSam]);
 
   const handleImageLoaded = useCallback((newImage: LoadedImage) => {
     if (
@@ -99,10 +123,20 @@ export function ModelLabPage({ createMobileSamClient }: ModelLabPageProps = {}) 
 
   const handleImageClick = useCallback(
     (x: number, y: number) => {
-      if (!isMobileSamActive || !image) return;
-      segmentMobileSamAtPoint(image, x, y);
+      if (!image) return;
+      if (isMobileSamActive) {
+        segmentMobileSamAtPoint(image, x, y);
+      } else if (isEdgeSamActive) {
+        segmentEdgeSamAtPoint(image, x, y);
+      }
     },
-    [isMobileSamActive, image, segmentMobileSamAtPoint]
+    [
+      isMobileSamActive,
+      isEdgeSamActive,
+      image,
+      segmentMobileSamAtPoint,
+      segmentEdgeSamAtPoint,
+    ]
   );
 
   const result: ModelLabResult | null =
@@ -119,11 +153,27 @@ export function ModelLabPage({ createMobileSamClient }: ModelLabPageProps = {}) 
             },
           ],
         }
-      : null;
+      : isEdgeSamActive && edgeSamMask
+        ? {
+            modelId: EDGE_SAM_MODEL_ID,
+            overlays: [
+              {
+                kind: "mask",
+                data: edgeSamMask.data,
+                width: edgeSamMask.width,
+                height: edgeSamMask.height,
+                score: edgeSamMask.score,
+              },
+            ],
+          }
+        : null;
 
   const isMobileSamBusy =
     isMobileSamActive &&
     (mobileSamStatus === "loading" || mobileSamStatus === "segmenting");
+  const isEdgeSamBusy =
+    isEdgeSamActive && (edgeSamStatus === "loading" || edgeSamStatus === "segmenting");
+  const isActiveModelBusy = isMobileSamBusy || isEdgeSamBusy;
 
   return (
     <div className="space-y-6">
@@ -182,14 +232,26 @@ export function ModelLabPage({ createMobileSamClient }: ModelLabPageProps = {}) 
         </Alert>
       )}
 
+      {isEdgeSamActive && edgeSamError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>EdgeSAM の推論に失敗しました</AlertTitle>
+          <AlertDescription>
+            {edgeSamError.message || "不明なエラーです"}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {!image ? (
         <ImageDropzone onImageLoaded={handleImageLoaded} />
       ) : (
         <ModelLabResultView
           image={image}
           result={result}
-          onImageClick={isMobileSamActive ? handleImageClick : undefined}
-          isBusy={isMobileSamBusy}
+          onImageClick={
+            isMobileSamActive || isEdgeSamActive ? handleImageClick : undefined
+          }
+          isBusy={isActiveModelBusy}
         />
       )}
     </div>
