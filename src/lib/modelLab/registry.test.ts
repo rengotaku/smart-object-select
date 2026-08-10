@@ -18,6 +18,12 @@ describe("ModelLabRegistry", () => {
     expect(yolo?.name).toBe("YOLO11n-seg");
   });
 
+  it("fast-sam（issue #50）が登録されている", () => {
+    const fastSam = ModelLabRegistry.find((model) => model.id === "fast-sam");
+    expect(fastSam).toBeDefined();
+    expect(fastSam?.name).toBe("FastSAM");
+  });
+
   it("ModelLabDescriptor を要素として追加できる形になっている（型レベルの拡張性確認）", () => {
     // 後続 sub-issue はこの配列に要素を追加するだけで選択肢が増える設計であることを、
     // 型と実行時の両方で確認する（コンパイルが通ること自体がこのテストの主眼）。

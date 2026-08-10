@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useMobileSam } from "@/hooks/useMobileSam";
 import { useEdgeSam } from "@/hooks/useEdgeSam";
 import { useYolo11nSeg } from "@/hooks/useYolo11nSeg";
+import { useFastSam } from "@/hooks/useFastSam";
 import type { LoadedImage } from "@/hooks";
 import {
   ModelLabRegistry,
@@ -17,9 +18,13 @@ import {
 import type { MobileSamWorkerClient } from "@/lib/modelLab/mobileSam";
 import type { EdgeSamWorkerClient } from "@/lib/modelLab/edgeSam";
 import {
-  findDetectionAtPoint,
+  findDetectionAtPoint as findYoloDetectionAtPoint,
   type Yolo11nSegWorkerClient,
 } from "@/lib/modelLab/yolo11nSeg";
+import {
+  findDetectionAtPoint as findFastSamDetectionAtPoint,
+  type FastSamWorkerClient,
+} from "@/lib/modelLab/fastSam";
 
 /** MobileSAM（issue #47）の `ModelLabDescriptor.id`。registry.ts のエントリと一致させる。 */
 const MOBILE_SAM_MODEL_ID = "mobile-sam";
@@ -27,8 +32,12 @@ const MOBILE_SAM_MODEL_ID = "mobile-sam";
 const EDGE_SAM_MODEL_ID = "edge-sam";
 /** YOLO11n-seg（issue #49）の `ModelLabDescriptor.id`。registry.ts のエントリと一致させる。 */
 const YOLO11N_SEG_MODEL_ID = "yolo11n-seg";
+/** FastSAM（issue #50）の `ModelLabDescriptor.id`。registry.ts のエントリと一致させる。 */
+const FAST_SAM_MODEL_ID = "fast-sam";
 
 const YOLO_CLICK_HINT_TEXT =
+  "画像をクリックすると、その位置にあるインスタンスをハイライトします";
+const FAST_SAM_CLICK_HINT_TEXT =
   "画像をクリックすると、その位置にあるインスタンスをハイライトします";
 
 export interface ModelLabPageProps {
@@ -50,6 +59,12 @@ export interface ModelLabPageProps {
    * 実クライアント）が使われる。
    */
   createYolo11nSegClient?: () => Yolo11nSegWorkerClient;
+  /**
+   * テストから fake FastSamWorkerClient を注入するためのフック（`createMobileSamClient`
+   * と同じ役割）。省略時は `useFastSam` の既定（`fastSam.worker.ts` を起動する
+   * 実クライアント）が使われる。
+   */
+  createFastSamClient?: () => FastSamWorkerClient;
 }
 
 /**
@@ -79,13 +94,18 @@ function revokeObjectUrl(url: string | undefined) {
  * MobileSAM/EdgeSAM とは根本的に異なるインタラクションで動作する。全自動でCOCO80クラスの
  * 全インスタンスを画像アップロード時に一括検出し、クリックは新規推論ではなく検出済み
  * インスタンスの選択（ハイライト）として扱う（親 #45「未確定の論点」を解決）。
- * 他モデル（FastSAM 等）は後続 sub-issue が同じ拡張ポイント
+ * FastSAM（issue #50）: `useFastSam`（`src/lib/modelLab/fastSam/`）を使い、YOLO11n-seg と
+ * 同じ「全自動検出＋クリックでのインスタンス選択」のインタラクションで動作する。ただし
+ * クラス非依存（単一の objectness スコアのみ）のため、COCOクラスのようなラベル表示は
+ * 行わない（issue #50 で親 #45「未確定の論点」を解決）。
+ * 他モデルは後続 sub-issue が同じ拡張ポイント
  * （ModelLabRegistry への追加 + このページでの switch）で追加していく想定。
  */
 export function ModelLabPage({
   createMobileSamClient,
   createEdgeSamClient,
   createYolo11nSegClient,
+  createFastSamClient,
 }: ModelLabPageProps = {}) {
   const [image, setImageState] = useState<LoadedImage | null>(null);
   // ModelLabRegistry にモデルが1件でも登録されていれば、その先頭を初期選択にする。
@@ -121,6 +141,7 @@ export function ModelLabPage({
   const isMobileSamActive = selectedModelId === MOBILE_SAM_MODEL_ID;
   const isEdgeSamActive = selectedModelId === EDGE_SAM_MODEL_ID;
   const isYoloActive = selectedModelId === YOLO11N_SEG_MODEL_ID;
+  const isFastSamActive = selectedModelId === FAST_SAM_MODEL_ID;
   const {
     status: mobileSamStatus,
     error: mobileSamError,
@@ -142,6 +163,13 @@ export function ModelLabPage({
     detect: detectYolo,
     reset: resetYolo,
   } = useYolo11nSeg({ createClient: createYolo11nSegClient });
+  const {
+    status: fastSamStatus,
+    error: fastSamError,
+    detections: fastSamDetections,
+    detect: detectFastSam,
+    reset: resetFastSam,
+  } = useFastSam({ createClient: createFastSamClient });
 
   useEffect(() => {
     return () => {
@@ -155,7 +183,8 @@ export function ModelLabPage({
     resetMobileSam();
     resetEdgeSam();
     resetYolo();
-  }, [selectedModelId, image, resetMobileSam, resetEdgeSam, resetYolo]);
+    resetFastSam();
+  }, [selectedModelId, image, resetMobileSam, resetEdgeSam, resetYolo, resetFastSam]);
 
   // YOLO11n-seg は点クリックではなく画像アップロード時の全自動検出（issue #49）。
   // `detectYolo` は同じ image に対しては再検出をスキップする（useYolo11nSeg.ts 参照）ため、
@@ -165,6 +194,13 @@ export function ModelLabPage({
       detectYolo(image);
     }
   }, [isYoloActive, image, detectYolo]);
+
+  // FastSAM も YOLO11n-seg と同じ全自動検出パラダイム（issue #50）。
+  useEffect(() => {
+    if (isFastSamActive && image) {
+      detectFastSam(image);
+    }
+  }, [isFastSamActive, image, detectFastSam]);
 
   const handleImageLoaded = useCallback((newImage: LoadedImage) => {
     if (
@@ -191,7 +227,10 @@ export function ModelLabPage({
       } else if (isEdgeSamActive) {
         segmentEdgeSamAtPoint(image, x, y);
       } else if (isYoloActive) {
-        const index = findDetectionAtPoint(yoloDetections ?? [], x, y);
+        const index = findYoloDetectionAtPoint(yoloDetections ?? [], x, y);
+        setSelectedInstanceIndex(index);
+      } else if (isFastSamActive) {
+        const index = findFastSamDetectionAtPoint(fastSamDetections ?? [], x, y);
         setSelectedInstanceIndex(index);
       }
     },
@@ -199,10 +238,12 @@ export function ModelLabPage({
       isMobileSamActive,
       isEdgeSamActive,
       isYoloActive,
+      isFastSamActive,
       image,
       segmentMobileSamAtPoint,
       segmentEdgeSamAtPoint,
       yoloDetections,
+      fastSamDetections,
     ]
   );
 
@@ -216,6 +257,18 @@ export function ModelLabPage({
     score: detection.score,
     mask: detection.mask,
   }));
+
+  const fastSamOverlays: ModelLabBoxOverlay[] = (fastSamDetections ?? []).map(
+    (detection) => ({
+      kind: "box",
+      x: detection.box.x,
+      y: detection.box.y,
+      width: detection.box.width,
+      height: detection.box.height,
+      score: detection.score,
+      mask: detection.mask,
+    })
+  );
 
   const result: ModelLabResult | null =
     isMobileSamActive && mobileSamMask
@@ -246,7 +299,9 @@ export function ModelLabPage({
           }
         : isYoloActive && yoloDetections
           ? { modelId: YOLO11N_SEG_MODEL_ID, overlays: yoloOverlays }
-          : null;
+          : isFastSamActive && fastSamDetections
+            ? { modelId: FAST_SAM_MODEL_ID, overlays: fastSamOverlays }
+            : null;
 
   const isMobileSamBusy =
     isMobileSamActive &&
@@ -255,11 +310,18 @@ export function ModelLabPage({
     isEdgeSamActive && (edgeSamStatus === "loading" || edgeSamStatus === "segmenting");
   const isYoloBusy =
     isYoloActive && (yoloStatus === "loading" || yoloStatus === "detecting");
-  const isActiveModelBusy = isMobileSamBusy || isEdgeSamBusy || isYoloBusy;
+  const isFastSamBusy =
+    isFastSamActive && (fastSamStatus === "loading" || fastSamStatus === "detecting");
+  const isActiveModelBusy =
+    isMobileSamBusy || isEdgeSamBusy || isYoloBusy || isFastSamBusy;
 
   const selectedInstance =
     isYoloActive && selectedInstanceIndex !== null
       ? (yoloDetections?.[selectedInstanceIndex] ?? null)
+      : null;
+  const selectedFastSamInstance =
+    isFastSamActive && selectedInstanceIndex !== null
+      ? (fastSamDetections?.[selectedInstanceIndex] ?? null)
       : null;
 
   return (
@@ -349,6 +411,28 @@ export function ModelLabPage({
         </Alert>
       )}
 
+      {isFastSamActive && (
+        <Alert data-testid="model-lab-fastsam-notice">
+          <Info className="size-4" />
+          <AlertTitle>FastSAM はクラス名を判別できません</AlertTitle>
+          <AlertDescription>
+            任意の物体を検出できますが、人物・車・動物といった人間可読なラベルは付与されません
+            （クラス非依存の objectness スコアのみ）。ライセンス: AGPL-3.0（
+            <code>public/models/fast-sam/NOTICE</code> 参照）。
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {isFastSamActive && fastSamError && (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>FastSAM の推論に失敗しました</AlertTitle>
+          <AlertDescription>
+            {fastSamError.message || "不明なエラーです"}
+          </AlertDescription>
+        </Alert>
+      )}
+
       {!image ? (
         <ImageDropzone onImageLoaded={handleImageLoaded} />
       ) : (
@@ -357,13 +441,21 @@ export function ModelLabPage({
             image={image}
             result={result}
             onImageClick={
-              isMobileSamActive || isEdgeSamActive || isYoloActive
+              isMobileSamActive || isEdgeSamActive || isYoloActive || isFastSamActive
                 ? handleImageClick
                 : undefined
             }
             isBusy={isActiveModelBusy}
-            clickHintText={isYoloActive ? YOLO_CLICK_HINT_TEXT : undefined}
-            highlightedOverlayIndex={isYoloActive ? selectedInstanceIndex : null}
+            clickHintText={
+              isYoloActive
+                ? YOLO_CLICK_HINT_TEXT
+                : isFastSamActive
+                  ? FAST_SAM_CLICK_HINT_TEXT
+                  : undefined
+            }
+            highlightedOverlayIndex={
+              isYoloActive || isFastSamActive ? selectedInstanceIndex : null
+            }
           />
           {isYoloActive && yoloDetections && (
             <p
@@ -376,6 +468,21 @@ export function ModelLabPage({
                   {" "}
                   ／ 選択中: {selectedInstance.label}（
                   {Math.round(selectedInstance.score * 100)}%）
+                </>
+              )}
+            </p>
+          )}
+          {isFastSamActive && fastSamDetections && (
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="model-lab-fastsam-summary"
+            >
+              検出数: {fastSamDetections.length}件
+              {selectedFastSamInstance && (
+                <>
+                  {" "}
+                  ／ 選択中インスタンス（
+                  {Math.round(selectedFastSamInstance.score * 100)}%）
                 </>
               )}
             </p>
