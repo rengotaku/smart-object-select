@@ -22,6 +22,7 @@ export {
   createMobileSamSession,
   MobileSamDisposedError,
   MobileSamNoImageError,
+  MobileSamStaleRequestError,
   type MobileSamSession,
 } from "./session";
 export type { MobileSamWorkerRequest, MobileSamWorkerResponse } from "./protocol";

@@ -27,6 +27,13 @@ export class MobileSamNoImageError extends Error {
   }
 }
 
+export class MobileSamStaleRequestError extends Error {
+  constructor(message = "The MobileSAM request is stale and its result was discarded") {
+    super(message);
+    this.name = "MobileSamStaleRequestError";
+  }
+}
+
 export interface MobileSamSession {
   setImage(image: SamImageInput): Promise<void>;
   segmentAtPoint(x: number, y: number): Promise<MobileSamMaskResult>;
@@ -58,6 +65,15 @@ function maskTensorToResult(
  * 閉じ込めてあり（onnxRuntime.ts）、このファイルは前処理・推論呼び出し・後処理の
  * 組み立てのみを担う。既存の `src/lib/sam/samSession.ts` とは完全に独立した実装
  * （issue #47 やってはいけないこと: 既存ファイルへの変更禁止）。
+ *
+ * 1つのセッション（Worker）に対し複数の `setImage` が競合して呼ばれうる
+ * （例: 画像Aのエンコード中に画像Bへ切り替えてすぐクリックする）。`onmessage` は
+ * 前のリクエストの完了を待たずに次のメッセージを処理する（`mobileSam.worker.ts`）ため、
+ * 何もガードしないと画像Aの結果が画像Bより後に届いて共有状態 `embeddings` を
+ * 上書きし、画像Bへのクリックが画像Aのマスクを返しうる。
+ * `src/lib/sam/samSession.ts` の generation ガード（ADR 0002）と同じパターンで、
+ * 世代の古い `setImage` の結果は状態を上書きせず、世代の古い embedding に基づく
+ * `segmentAtPoint` は `MobileSamStaleRequestError` で破棄する。
  */
 export async function createMobileSamSession(
   runtime: MobileSamRuntime
@@ -66,9 +82,15 @@ export async function createMobileSamSession(
   const decoderSession = await runtime.createSession(MOBILE_SAM_DECODER_URL);
 
   let disposed = false;
+  let generation = 0;
   let embeddings: MobileSamTensor | null = null;
   let currentImageSize: { width: number; height: number } | null = null;
   let encoderScale = 1;
+  // 保持している embeddings/currentImageSize/encoderScale がどの世代の setImage に
+  // よって作られたか。generation（最新の setImage 呼び出し世代）とは別に持つことで、
+  // 「setImage 実行中（=generation は進んでいるが embeddings はまだ古い画像のまま）」を
+  // segmentAtPoint 側から検出できる（samSession.ts と同じ理由）。
+  let embeddingsGeneration = 0;
 
   function ensureNotDisposed(): void {
     if (disposed) {
@@ -78,6 +100,8 @@ export async function createMobileSamSession(
 
   async function setImage(image: SamImageInput): Promise<void> {
     ensureNotDisposed();
+    generation += 1;
+    const requestGeneration = generation;
 
     const {
       width: resizedWidth,
@@ -91,7 +115,13 @@ export async function createMobileSamSession(
       input_image: { data: inputData, dims: [resizedHeight, resizedWidth, 3] },
     });
 
-    ensureNotDisposed();
+    if (disposed) {
+      throw new MobileSamDisposedError();
+    }
+    if (requestGeneration !== generation) {
+      // より新しい setImage が既に走っている。古い結果で状態を上書きしない。
+      return;
+    }
 
     const imageEmbeddings = output.image_embeddings;
     if (!imageEmbeddings) {
@@ -101,6 +131,7 @@ export async function createMobileSamSession(
     embeddings = imageEmbeddings;
     currentImageSize = { width: image.width, height: image.height };
     encoderScale = scale;
+    embeddingsGeneration = requestGeneration;
   }
 
   async function segmentAtPoint(x: number, y: number): Promise<MobileSamMaskResult> {
@@ -108,6 +139,19 @@ export async function createMobileSamSession(
     if (!embeddings || !currentImageSize) {
       throw new MobileSamNoImageError();
     }
+
+    // 呼び出し時点で保持している embeddings の世代を固定する。以降このリクエストの
+    // 結果は常にこの世代と現在の generation を突き合わせて判定する（generation
+    // そのものではなく embeddings の世代を基準にすることで、setImage 実行中の
+    // 呼び出しも検出できる）。
+    const embeddingGeneration = embeddingsGeneration;
+    if (embeddingGeneration !== generation) {
+      // 新しい setImage が進行中（embeddings はまだ古い画像のまま）。推論を開始せず破棄する。
+      throw new MobileSamStaleRequestError();
+    }
+
+    const embeddingsSnapshot = embeddings;
+    const imageSizeSnapshot = currentImageSize;
 
     const point = scalePointToEncoderSpace(x, y, encoderScale);
     // SAM の ONNX デコーダはボックスプロンプト無しの場合、末尾に (0,0)/label=-1 の
@@ -120,7 +164,7 @@ export async function createMobileSamSession(
     );
 
     const output = await decoderSession.run({
-      image_embeddings: embeddings,
+      image_embeddings: embeddingsSnapshot,
       point_coords: { data: pointCoords, dims: [1, 2, 2] },
       point_labels: { data: pointLabels, dims: [1, 2] },
       mask_input: {
@@ -129,12 +173,18 @@ export async function createMobileSamSession(
       },
       has_mask_input: { data: new Float32Array([0]), dims: [1] },
       orig_im_size: {
-        data: new Float32Array([currentImageSize.height, currentImageSize.width]),
+        data: new Float32Array([imageSizeSnapshot.height, imageSizeSnapshot.width]),
         dims: [2],
       },
     });
 
-    ensureNotDisposed();
+    if (disposed) {
+      throw new MobileSamDisposedError();
+    }
+    if (embeddingGeneration !== generation) {
+      // decode 待機中に画像が差し替えられた。古い画像のマスクは返さない。
+      throw new MobileSamStaleRequestError();
+    }
 
     const masks = output.masks;
     if (!masks) {

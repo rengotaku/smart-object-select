@@ -8,6 +8,19 @@ import type {
   MobileSamTensor,
 } from "./onnxRuntime";
 
+/**
+ * setTimeout 等でタイミングを作らず、手動で resolve/reject できる deferred promise。
+ * `mobileSam.worker.ts` の onmessage が先行リクエストの完了を待たずに次を処理する
+ * 競合状態を決定的に再現するために使う。
+ */
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
 type RunFn = (feeds: Record<string, MobileSamTensor>) => Record<string, MobileSamTensor>;
 
 const DEFAULT_ENCODER_RUN: RunFn = () => ({
@@ -130,4 +143,69 @@ describe("createMobileSamWorkerHandler", () => {
       message: "decode failed",
     });
   });
+
+  it(
+    "画像Aのエンコード中に画像Bへのsetimageリクエストが割り込み、" +
+      "Aが後から完了しても後続の segmentAtPoint は画像Bに基づく結果を返す" +
+      "（onmessage は先行リクエストの完了を待たない。codex レビュー指摘の再発防止）",
+    async () => {
+      const deferredA = deferred<Record<string, MobileSamTensor>>();
+      const deferredB = deferred<Record<string, MobileSamTensor>>();
+      const embeddingsQueue = [deferredA, deferredB];
+      let callIndex = 0;
+      const encoderRun = vi.fn(() => embeddingsQueue[callIndex++]!.promise);
+      const decoderRun = vi.fn((feeds: Record<string, MobileSamTensor>) =>
+        Promise.resolve(DEFAULT_DECODER_RUN(feeds))
+      );
+
+      const runtime: MobileSamRuntime = {
+        async createSession(url: string): Promise<MobileSamInferenceSession> {
+          if (url === MOBILE_SAM_ENCODER_URL) {
+            return { run: encoderRun };
+          }
+          if (url === MOBILE_SAM_DECODER_URL) {
+            return { run: decoderRun };
+          }
+          throw new Error(`unexpected url: ${url}`);
+        },
+      };
+      const handler = createMobileSamWorkerHandler(runtime);
+
+      const imageB: SamImageInput = {
+        data: new Uint8ClampedArray(2 * 2 * 4),
+        width: 3,
+        height: 3,
+      };
+
+      // mobileSam.worker.ts の onmessage は setImage(A) の完了を待たずに setImage(B) を
+      // 処理へ回す（Promise を await しない fire-and-forget）ため、ここでも両方の
+      // handle() 呼び出しを await せずに並行実行する。
+      const handleA = handler.handle({ id: "req-A", type: "setImage", image: IMAGE });
+      const handleB = handler.handle({ id: "req-B", type: "setImage", image: imageB });
+
+      // Bが先に完了し、Aが後から遅れて完了する。
+      deferredB.resolve({
+        image_embeddings: { data: new Float32Array([2]), dims: [1, 1, 1, 1] },
+      });
+      await handleB;
+      deferredA.resolve({
+        image_embeddings: { data: new Float32Array([1]), dims: [1, 1, 1, 1] },
+      });
+      await handleA;
+
+      const response = await handler.handle({
+        id: "req-C",
+        type: "segmentAtPoint",
+        x: 0,
+        y: 0,
+      });
+
+      expect(response.type).toBe("result");
+      expect(decoderRun).toHaveBeenCalledTimes(1);
+      const feeds = decoderRun.mock.calls[0][0] as Record<string, MobileSamTensor>;
+      // 画像B（3x3）のサイズ・embeddings が使われること（画像Aで上書きされていないこと）
+      expect(Array.from(feeds.orig_im_size.data)).toEqual([3, 3]);
+      expect(Array.from(feeds.image_embeddings.data)).toEqual([2]);
+    }
+  );
 });
