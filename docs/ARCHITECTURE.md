@@ -268,8 +268,23 @@ TDD の「先に赤を見る」と目的は同じだが、**修正系のタス�
 | 実行方式（ブラウザ内蔵/PCローカルサーバー）の切り替えUIを変える                        | `src/lib/sam/executionMode.ts`（`ExecutionMode` 型）、`src/hooks/useSamEngine.ts`（`executionMode`/`serverUrl`/`modelId` で生成するクライアントを分岐）、`src/pages/SegmentPage.tsx`（セレクタ・サーバーURL入力・モデル選択UI）                                                                                                                                                                                                                                                       |
 | PCローカルサーバー側にモデルを追加する                                                 | `src/lib/sam/constants.ts`（`AVAILABLE_SAM_MODELS`。フロント・サーバー共通の単一ソース、`server/src/modelRegistry.ts` が re-export）。モデル資産の追加自体は「モデルを変える」行と同じ手順（`public/models/<新ID>/` + `cachePolicy.ts`/`sw.js` 更新）。サーバー側は `server/src/server.ts` が `AVAILABLE_MODELS` を自動的に読んで `SamRuntime` を用意するため追加の配線は不要                                                                                                        |
 | PCローカルサーバーのAPIを変える                                                        | `server/src/app.ts`（ルーティング）、`server/src/wireFormat.ts`（リクエスト/レスポンスの形式）、`src/lib/sam/httpSamClient.ts`（対応するフロント側呼び出し）を揃って更新すること                                                                                                                                                                                                                                                                                                       |
+| Model Lab（`/model-lab`）に新しい検証用モデルを追加する                                | `src/lib/modelLab/registry.ts`（`ModelLabRegistry` に要素追加）＋ `src/lib/modelLab/<新モデルID>/`（前処理・後処理・`onnxRuntime.ts`・Worker基盤・世代ガード付きセッションを新規実装）＋ `public/models/<新モデルID>/`（モデル資産 + `NOTICE`。ライセンスはHugging Face cardDataだけでなくupstreamの実LICENSEファイルまで確認すること）。既存4モデル実装済みの罠（§8参照、ADR 0007）を先に読んでから着手する                                                                          |
 
-## 8. 参考
+## 8. Model Lab（`/model-lab`）: 却下・保留したSAM代替モデルの検証専用ページ
+
+`/segment`（本編）とは独立した検証専用ページ。issue #34/ADR 0006で統合コスト・機能制約を理由に見送ったSAM代替モデル4種（MobileSAM・EdgeSAM・YOLO11n-seg・FastSAM）を、実際にブラウザWASM実行で試して比較できる（ADR 0007）。
+
+- **エントリポイント**: `src/pages/ModelLabPage.tsx`（`/model-lab` ルート、`src/App.tsx`）。ヘッダーの「Model Lab」リンクから遷移
+- **`/segment` とは完全に独立**: `useSamEngine`・`src/lib/sam/*`（`samSession.ts`・`transformersLoader.ts`・`SamWorkerClient` 等）には一切依存しない。`transformers.js` を経由せず `onnxruntime-web` を各モデルが直接呼ぶ（既存モデルとの統合コストが高かったのが元々の却下理由そのものであるため）
+- **モデルレジストリ**: `src/lib/modelLab/registry.ts` の `ModelLabRegistry` 配列に要素を足すだけで選択肢が増える。各モデルは `src/lib/modelLab/{mobileSam,edgeSam,yolo11nSeg,fastSam}/` に独立実装（前処理・後処理・`onnxRuntime.ts`・Worker基盤・世代ガード付きセッション）を持つ
+- **2種類のインタラクションパラダイム**（`src/lib/modelLab/results.ts` の `ModelLabResult`/`ModelLabOverlay` 判別可能ユニオン型で表現）:
+  - 点プロンプト方式（MobileSAM・EdgeSAM）: `kind: "mask"`、クリック→その位置のマスクを推論
+  - 全自動検出方式（YOLO11n-seg・FastSAM）: `kind: "box"`、アップロード時に全インスタンス一括検出→クリックでハイライト
+- **描画**: `src/components/modelLab/ModelLabResultView.tsx` の `drawMaskLikeOverlay` が `kind` ごとに異なる描画先矩形（`dest`）を要求する。全画面マスクは画像全体への拡大描画、部分マスク（バウンディングボックス範囲のみ + オフセット座標）は等倍配置。**ここを混同すると片方にリグレッションが起きる**（ADR 0007 罠5）
+- **モデル資産**: `public/models/{mobile-sam,edge-sam,yolo11n-seg,fast-sam}/`。各モデルのライセンスは性質が異なる（Apache-2.0 / S-Lab License 1.0＝非商用限定 / AGPL-3.0 ×2）ため、追加時は各 `NOTICE` とADR 0007のライセンス比較表を必ず参照すること
+- **実装済みの罠と恒久対応**（新モデルを追加する際は同じ罠を踏まないよう、ADR 0007「実装中に発覚した技術的な罠」を先に読むこと）: WASMランタイム(.mjs)のBlobURL化、WASMバイナリ版によるop非対応、マスクのバウンディングボックス範囲限定保持、プロトタイプ空間でのマスク合成、NMS後の検出数上限適用
+
+## 9. 参考
 
 - GitHub issue [#1](https://github.com/rengotaku/smart-object-select/issues/1)（親 issue・Decision Log。論点1〜6の決定と根拠）
 - `docs/adr/0001-client-side-sam-in-web-worker.md`（クライアントサイド実行・Worker 必須化の決定）
@@ -277,4 +292,5 @@ TDD の「先に赤を見る」と目的は同じだが、**修正系のタス�
 - `docs/adr/0004-slimsam-box-input-unsupported.md`（box プロンプトが現行モデルで機能しない理由、positive/negative 複数点への切り替え）
 - `docs/adr/0005-offline-first-model-delivery.md`（モデル配信をオフライン完結型に切り替えた決定。進捗表示の自前集計・自前ホスティング・Service Worker キャッシュの3点セット、issue #10/#21/#22/#23）
 - GitHub issue [#31](https://github.com/rengotaku/smart-object-select/issues/31)（PCローカル推論サーバー化の親issue・Decision Log。実現方式・技術スタック・API仕様変更の経緯）
+- `docs/adr/0007-model-lab-verification-page.md`（Model Lab検証ページの設計・実装中に発覚した罠・ライセンス対応方針、issue #45〜#50）
 - `docs/adr/0006-local-inference-server.md`（PCローカル推論サーバーを追加した決定。既存のブラウザ内蔵実行を維持したまま実行方式を選択可能にした理由、issue #31/#32/#33/#34）
