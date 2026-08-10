@@ -64,6 +64,21 @@ export const FASTSAM_CONFIDENCE_THRESHOLD = 0.4;
  */
 export const FASTSAM_IOU_THRESHOLD = 0.9;
 
+/**
+ * 信頼度閾値通過後、NMS に渡す前に採用する候補数の上限（スコア降順で上位のみ残す）。
+ * Ultralytics 公式実装の `max_det`（NMS 後の最終検出数上限、既定 300）に倣う値。
+ *
+ * FastSAM は class-agnostic な "segment everything" モデルで、IoU 閾値も 0.9 と高い
+ * （＝ほぼ抑制されない）ため、複雑な画像では信頼度閾値通過後の候補が数千件規模になりうる。
+ * この実装の `nms()` は O(n^2) の素朴な貪欲法であり、かつ NMS 通過後の各候補について
+ * 256x256x32 のマスク復号＋元画像へのアップサンプリングを行う（`decodeInstanceMask` 参照）
+ * ため、候補数を絞らないと NMS 自体のコストと後段のマスク復号コストの両方が線形以上に
+ * 膨張し、Worker が長時間ブロックしうる（issue #50 codex レビュー指摘）。
+ * `decodeDetections` が信頼度閾値通過後にスコア降順で上位 `FASTSAM_MAX_DETECTIONS` 件へ
+ * 打ち切ることで、NMS の入力サイズとマスク復号回数の両方をこの値で上限化する。
+ */
+export const FASTSAM_MAX_DETECTIONS = 300;
+
 /** マスクロジットの二値化閾値。sigmoid(logit) > この値を前景とする（Ultralytics 既定値と同じ 0.5）。 */
 export const FASTSAM_MASK_THRESHOLD = 0.5;
 

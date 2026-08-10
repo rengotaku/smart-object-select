@@ -5,6 +5,7 @@ import {
   FASTSAM_MASK_PROTO_CHANNELS,
   FASTSAM_MASK_PROTO_SIZE,
   FASTSAM_MASK_THRESHOLD,
+  FASTSAM_MAX_DETECTIONS,
 } from "./constants";
 import { mapBoxToOriginal, type BoxXywh, type LetterboxTransform } from "./preprocess";
 import type { FastSamDetection } from "./types";
@@ -22,6 +23,13 @@ export interface RawDetection {
 export interface DecodeDetectionsOptions {
   maskProtoChannels?: number;
   confidenceThreshold?: number;
+  /**
+   * 信頼度閾値通過後、NMS に渡す前に採用する候補数の上限（スコア降順で上位のみ残す）。
+   * 省略時は `FASTSAM_MAX_DETECTIONS`。詳細は `constants.ts` のコメント参照
+   * （issue #50 codex レビュー指摘: NMS の O(n^2) コストとマスク復号コストの両方を
+   * 候補数で上限化する）。
+   */
+  maxDetections?: number;
 }
 
 /**
@@ -39,6 +47,13 @@ export interface DecodeDetectionsOptions {
  * （Ultralytics の `non_max_suppression` 前の生出力フォーマット）。objectness スコアは
  * onnxruntime-node での実測により既に sigmoid 適用済み（0-1 に収まる）ことを確認済みのため、
  * ここで追加の sigmoid は適用しない（`public/models/fast-sam/NOTICE` 参照）。
+ *
+ * 信頼度閾値通過後の候補が `maxDetections`（既定 `FASTSAM_MAX_DETECTIONS`）を超える場合、
+ * スコア降順で上位のみに打ち切る。FastSAM は class-agnostic な "segment everything" モデルで
+ * IoU 閾値も 0.9 と高い（＝ほぼ抑制されない）ため、複雑な画像では信頼度閾値通過後の候補が
+ * 数千件規模になりうる。ここで打ち切らないと、後段の `nms()`（O(n^2) の素朴な貪欲法）と
+ * `decodeInstanceMask()`（各候補ごとに 256x256x32 の内積＋アップサンプリング）の両方の
+ * コストが線形以上に膨張し、Worker が長時間ブロックしうる（issue #50 codex レビュー指摘）。
  */
 export function decodeDetections(
   output: Float32Array,
@@ -47,6 +62,7 @@ export function decodeDetections(
 ): RawDetection[] {
   const maskProtoChannels = options.maskProtoChannels ?? FASTSAM_MASK_PROTO_CHANNELS;
   const confidenceThreshold = options.confidenceThreshold ?? FASTSAM_CONFIDENCE_THRESHOLD;
+  const maxDetections = options.maxDetections ?? FASTSAM_MAX_DETECTIONS;
 
   const [, predLen, numCandidates] = dims;
   const expectedPredLen = 4 + 1 + maskProtoChannels;
@@ -83,7 +99,13 @@ export function decodeDetections(
     });
   }
 
-  return detections;
+  if (detections.length <= maxDetections) {
+    return detections;
+  }
+
+  // NMS・マスク復号のコストを上限化するため、スコア降順で上位 maxDetections 件のみ残す
+  // （Ultralytics 公式実装の `max_det` に倣う。issue #50 codex レビュー指摘）。
+  return detections.sort((a, b) => b.score - a.score).slice(0, maxDetections);
 }
 
 /** 2つの xywh ボックスの IoU（重なり無しは 0）。 */

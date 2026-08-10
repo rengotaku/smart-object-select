@@ -89,6 +89,63 @@ describe("decodeDetections", () => {
     });
     expect(result).toEqual([]);
   });
+
+  it("信頼度閾値通過後の候補が maxDetections を超える場合、スコア上位のみに打ち切る（issue #50 codex レビュー指摘: NMS/マスク復号コストの上限化）", () => {
+    // 5候補が閾値(0.4)を通過するが maxDetections=3 のため上位3件のみ残るはず
+    const { data, dims } = buildOutput0(1, [
+      { cx: 1, cy: 1, w: 1, h: 1, score: 0.5, maskCoeffs: [0] },
+      { cx: 2, cy: 2, w: 1, h: 1, score: 0.95, maskCoeffs: [0] },
+      { cx: 3, cy: 3, w: 1, h: 1, score: 0.6, maskCoeffs: [0] },
+      { cx: 4, cy: 4, w: 1, h: 1, score: 0.99, maskCoeffs: [0] },
+      { cx: 5, cy: 5, w: 1, h: 1, score: 0.41, maskCoeffs: [0] },
+    ]);
+
+    const result = decodeDetections(data, dims, {
+      maskProtoChannels: 1,
+      confidenceThreshold: 0.4,
+      maxDetections: 3,
+    });
+
+    expect(result).toHaveLength(3);
+    // スコア降順で上位3件（0.99, 0.95, 0.6）のみ残り、最低スコアの0.41・0.5は落ちる
+    const scores = result.map((d) => d.score).sort((a, b) => b - a);
+    expect(scores.map((s) => Number(s.toFixed(2)))).toEqual([0.99, 0.95, 0.6]);
+  });
+
+  it("候補数が maxDetections 以下なら打ち切らない", () => {
+    const { data, dims } = buildOutput0(1, [
+      { cx: 1, cy: 1, w: 1, h: 1, score: 0.5, maskCoeffs: [0] },
+      { cx: 2, cy: 2, w: 1, h: 1, score: 0.6, maskCoeffs: [0] },
+    ]);
+
+    const result = decodeDetections(data, dims, {
+      maskProtoChannels: 1,
+      confidenceThreshold: 0.4,
+      maxDetections: 3,
+    });
+
+    expect(result).toHaveLength(2);
+  });
+
+  it("maxDetections を省略すると既定値 FASTSAM_MAX_DETECTIONS(300) が使われる", () => {
+    // 閾値通過候補を301件用意し、既定では300件に打ち切られることを確認する
+    const candidates = Array.from({ length: 301 }, (_, i) => ({
+      cx: i,
+      cy: i,
+      w: 1,
+      h: 1,
+      score: 0.5 + i * 0.0001,
+      maskCoeffs: [0],
+    }));
+    const { data, dims } = buildOutput0(1, candidates);
+
+    const result = decodeDetections(data, dims, {
+      maskProtoChannels: 1,
+      confidenceThreshold: 0.4,
+    });
+
+    expect(result).toHaveLength(300);
+  });
 });
 
 describe("computeIoU", () => {
