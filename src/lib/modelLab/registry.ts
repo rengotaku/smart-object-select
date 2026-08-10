@@ -32,6 +32,13 @@ export interface ModelLabDescriptor {
  * 経由で使う。id はその2箇所と一致させること。MobileSAM/EdgeSAM とは異なり、点クリックの
  * 代わりに画像アップロード時の全自動検出＋クリックでのインスタンス選択（ハイライト）という
  * インタラクションを取る（親 #45「未確定の論点」を issue #49 で解決）。
+ *
+ * "fast-sam"（issue #50）: `src/lib/modelLab/fastSam/` が提供する
+ * `onnxruntime-web` 直接実行のセッションを `useFastSam`（`src/hooks/useFastSam.ts`）
+ * 経由で使う。id はその2箇所と一致させること。YOLO11n-seg と同じ「全自動検出＋クリック
+ * でのインスタンス選択」のインタラクションを取るが、FastSAM はクラス非依存（単一の
+ * objectness スコアのみで、COCOクラスのような人間可読なラベルを持たない）（issue #50 で
+ * 親 #45「未確定の論点」を解決）。
  */
 export const ModelLabRegistry: ModelLabDescriptor[] = [
   {
@@ -55,5 +62,13 @@ export const ModelLabRegistry: ModelLabDescriptor[] = [
       "COCO80クラス固定の全自動インスタンスセグメンテーション。任意物体は選べない閉集合検出器。" +
       "画像アップロードで全インスタンスを一括検出し、クリックで該当インスタンスをハイライトする" +
       "（issue #49 で検証用に統合。ライセンス: AGPL-3.0）。",
+  },
+  {
+    id: "fast-sam",
+    name: "FastSAM",
+    description:
+      "クラス非依存の全自動セグメンテーション（YOLOv8-segベース）。任意物体を検出できるが" +
+      "人間可読なラベルは持たない。画像アップロードで全インスタンスを一括検出し、クリックで" +
+      "該当インスタンスをハイライトする（issue #50 で検証用に統合。ライセンス: AGPL-3.0）。",
   },
 ];

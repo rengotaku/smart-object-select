@@ -1,0 +1,77 @@
+smart-object-select bundles model files derived from the following third-party model.
+
+Model: FastSAM-s
+Source: https://huggingface.co/anakhiu/fastsam-onnx (`fastsam_s.onnx`)
+  (fp32 ONNX export of FastSAM-s / YOLOv8s-seg, ~11.8M params, exported with
+  `ultralytics` 8.4.107 at `imgsz=1024`, `opset=17`, simplified with `onnxslim`;
+  unmodified — republished verbatim into public/models/fast-sam/ so that
+  smart-object-select can serve the model from its own origin instead of fetching
+  it from the Hugging Face Hub at runtime)
+Original model: https://github.com/CASIA-IVA-Lab/FastSAM (FastSAM-s, class-agnostic
+  "segment everything" instance segmentation trained on a subset of SA-1B, built on
+  the Ultralytics YOLOv8-seg architecture/training code)
+
+License:
+  The upstream CASIA-IVA-Lab/FastSAM repository's own LICENSE file
+  (https://github.com/CASIA-IVA-Lab/FastSAM/blob/main/LICENSE) is the full text of
+  the GNU Affero General Public License v3.0 (AGPL-3.0), even though that repo's
+  README.md states "The model is licensed under the Apache 2.0 license" (a
+  discrepancy within the upstream repo itself: README claims Apache-2.0, the actual
+  LICENSE file is AGPL-3.0). The Hugging Face export used here
+  (anakhiu/fastsam-onnx) also declares `license: apache-2.0` in its repository card,
+  which is presumed to simply carry over the same upstream README claim rather than
+  an independent licensing decision. Given this contradiction, and consistent with
+  issue #50 (parent #45) guidance to treat FastSAM the same as YOLO11n-seg
+  (public/models/yolo11n-seg/NOTICE) since both are Ultralytics-YOLOv8-seg-derived,
+  this file is conservatively licensed and distributed here under AGPL-3.0 (the
+  license actually present in the upstream LICENSE file). A copy of the AGPL-3.0
+  license text is included at the repository root (`LICENSE`); this repository
+  (this smart-object-select project) is published as AGPL-3.0 in full to satisfy
+  this requirement (source-available on GitHub, including when accessed over a
+  network, per AGPL-3.0 Section 13). This decision follows the same reasoning
+  already confirmed with the repository owner for YOLO11n-seg (issue #45 Decision
+  Log #4, issue #49).
+
+  Like YOLO11n-seg (AGPL-3.0, public/models/yolo11n-seg/NOTICE) and unlike MobileSAM
+  (Apache-2.0, public/models/mobile-sam/NOTICE) / EdgeSAM (S-Lab License 1.0 /
+  non-commercial, public/models/edge-sam/NOTICE), this is a copyleft (not
+  permissive, not non-commercial-only) license: commercial use is allowed, but any
+  distribution (including network use, i.e. running this app as a service) requires
+  making the complete corresponding source code available under AGPL-3.0. This
+  repository being fully public on GitHub satisfies that requirement.
+
+Files included:
+  - fastsam-s.onnx (fp32 ONNX export; input tensor `images` [1, 3, 1024, 1024]
+    float32, values 0-1, letterboxed with pad value 114/255; output tensors
+    `output0` [1, 37, 21504] (4 box (cx,cy,w,h in 1024-space) + 1 class-agnostic
+    "objectness" score (sigmoid already applied in the graph — do not re-apply
+    sigmoid to this value) + 32 mask coefficients per detection candidate) and
+    `output1` [1, 32, 256, 256] (mask prototypes at a quarter of input resolution).
+    Verified by loading the file with onnxruntime-node and inspecting
+    input/output names, shapes, and score value ranges (bounded 0-1) directly
+    (issue #50). This app's decoder
+    (src/lib/modelLab/fastSam/postprocess.ts) reads outputs by shape, not by
+    name, for the same defense-in-depth reason as YOLO11n-seg's decoder (a future
+    re-export could use different output tensor names while keeping the same
+    shapes).
+
+Changes made:
+  - No modification was made to the file contents. The file was copied verbatim
+    from the upstream Hugging Face repository into public/models/fast-sam/ (renamed
+    from `fastsam_s.onnx` to `fastsam-s.onnx` to match this repository's
+    `public/models/<model-id>/` naming convention; the bytes are unchanged) so that
+    smart-object-select can serve the model from its own origin instead of fetching
+    it from the Hugging Face Hub at runtime.
+
+Scope / interaction (see issue #50, parent #45):
+  - Unlike YOLO11n-seg, FastSAM is a class-agnostic "segment everything" model: it
+    has no notion of object categories (person/car/cat/etc.), only a single
+    objectness score per detected instance. It cannot produce a human-readable
+    class label for a detected instance.
+  - Per parent #45's unresolved point that issue #50 was asked to settle: this
+    integration uses the SAME interaction paradigm as YOLO11n-seg (issue #49) —
+    full-automatic "segment everything" on image upload, followed by click-to-select
+    among the already-detected instances — rather than FastSAM's native two-stage
+    point/box-prompt pipeline (Ultralytics `FastSAMPrompt`). This keeps the Model
+    Lab UI consistent across the two full-automatic-detection models and keeps the
+    implementation scope smaller (no point-prompt-driven re-filtering to build).
