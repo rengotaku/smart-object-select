@@ -24,4 +24,21 @@ describe("Layout", () => {
     expect(screen.getByRole("banner")).toBeInTheDocument(); // header
     expect(screen.getByRole("main")).toBeInTheDocument();
   });
+
+  it("renders navigation links to Segment and Model Lab pages", () => {
+    render(
+      <MemoryRouter>
+        <Layout />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByRole("link", { name: "Segment" })).toHaveAttribute(
+      "href",
+      "/segment"
+    );
+    expect(screen.getByRole("link", { name: "Model Lab" })).toHaveAttribute(
+      "href",
+      "/model-lab"
+    );
+  });
 });
