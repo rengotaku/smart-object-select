@@ -4,16 +4,26 @@ import { ImageOff, Loader2 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
 import type { LoadedImage } from "@/hooks";
-import type { ModelLabMaskOverlay, ModelLabResult } from "@/lib/modelLab";
+import type { ModelLabBoxOverlay, ModelLabResult } from "@/lib/modelLab";
 import { toImageCoords } from "@/lib/sam/coords";
 import { maskToOverlayPixels } from "@/lib/sam/maskOverlay";
+
+const DEFAULT_CLICK_HINT_TEXT = "画像をクリックすると、その位置でマスクを推論します";
+
+/** マスクオーバーレイの既定色（半透明の青） */
+const MASK_COLOR = { r: 59, g: 130, b: 246, a: 128 };
+/** 全自動検出系（`kind: "box"`）インスタンスの既定色（半透明の緑） */
+const BOX_COLOR = { r: 34, g: 197, b: 94, a: 90 };
+/** ハイライト中インスタンスの色（半透明の琥珀色。既定色より目立たせる） */
+const BOX_HIGHLIGHT_COLOR = { r: 250, g: 204, b: 21, a: 150 };
 
 export interface ModelLabResultViewProps {
   image: LoadedImage | null;
   /**
-   * モデルの実行結果。`kind: "mask"` のオーバーレイは overlay canvas に重ね描画する。
-   * `kind: "box"`（全自動検出系モデル）の描画は本 sub-issue（#47, MobileSAM統合）の
-   * スコープ外で、それを使う後続 sub-issue（YOLO11n-seg/FastSAM, #49/#50）が実装する。
+   * モデルの実行結果。`kind: "mask"` のオーバーレイ（点プロンプト系: MobileSAM/EdgeSAM）と
+   * `kind: "box"` のオーバーレイ（全自動検出系: YOLO11n-seg, issue #49）の両方を
+   * overlay canvas に重ね描画する。`kind: "box"` は `mask` フィールドがあればマスクも
+   * 塗りつぶし、常にバウンディングボックスの枠線を描く。
    */
   result?: ModelLabResult | null;
   /**
@@ -23,12 +33,51 @@ export interface ModelLabResultViewProps {
   onImageClick?: (x: number, y: number) => void;
   /** モデル推論の実行中インジケータを表示するかどうか。実行中はクリックも無視する。 */
   isBusy?: boolean;
+  /**
+   * `onImageClick` が渡っているときにクリック操作の説明として表示する文言。
+   * 省略時は点プロンプト系モデル向けの既定文言（マスク推論の説明）を使う。
+   * 全自動検出系モデル（YOLO11n-seg 等）は推論済みインスタンスの選択が目的のため
+   * 呼び出し側から別の文言を渡す（issue #49）。
+   */
+  clickHintText?: string;
+  /**
+   * `result.overlays` のうちハイライト表示するオーバーレイの index（`kind: "box"` のみ対象）。
+   * 全自動検出系モデルでクリックしたインスタンスを目立たせるために使う（issue #49）。
+   */
+  highlightedOverlayIndex?: number | null;
 }
 
 function isMaskOverlay(
   overlay: ModelLabResult["overlays"][number]
-): overlay is ModelLabMaskOverlay {
+): overlay is Extract<ModelLabResult["overlays"][number], { kind: "mask" }> {
   return overlay.kind === "mask";
+}
+
+function isBoxOverlay(
+  overlay: ModelLabResult["overlays"][number]
+): overlay is ModelLabBoxOverlay {
+  return overlay.kind === "box";
+}
+
+function drawMaskLikeOverlay(
+  ctx: CanvasRenderingContext2D,
+  canvas: HTMLCanvasElement,
+  mask: { data: Uint8Array; width: number; height: number },
+  score: number,
+  color: { r: number; g: number; b: number; a: number }
+): void {
+  const pixels = maskToOverlayPixels({ ...mask, score }, color);
+  const overlayImageData = ctx.createImageData(pixels.width, pixels.height);
+  overlayImageData.data.set(pixels.data);
+
+  const offscreen = document.createElement("canvas");
+  offscreen.width = pixels.width;
+  offscreen.height = pixels.height;
+  const offCtx = offscreen.getContext("2d");
+  if (offCtx) {
+    offCtx.putImageData(overlayImageData, 0, 0);
+    ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+  }
 }
 
 /**
@@ -36,13 +85,16 @@ function isMaskOverlay(
  *
  * - 画像未アップロード: 空状態を表示する
  * - 画像アップロード済み: プレビューを表示する。`onImageClick` が渡されていればクリックで
- *   元画像座標を通知し、`result.overlays` の `kind: "mask"` を overlay canvas に描画する
+ *   元画像座標を通知し、`result.overlays` を overlay canvas に描画する
+ *   （`kind: "mask"`: マスクの塗りつぶし。`kind: "box"`: 枠線＋あればマスクの塗りつぶし）
  */
 export function ModelLabResultView({
   image,
   result,
   onImageClick,
   isBusy = false,
+  clickHintText = DEFAULT_CLICK_HINT_TEXT,
+  highlightedOverlayIndex = null,
 }: ModelLabResultViewProps) {
   const overlayCanvasRef = useRef<HTMLCanvasElement>(null);
 
@@ -57,30 +109,36 @@ export function ModelLabResultView({
 
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    const maskOverlays = (result?.overlays ?? []).filter(isMaskOverlay);
-    for (const overlay of maskOverlays) {
-      const pixels = maskToOverlayPixels(
-        {
-          data: overlay.data,
-          width: overlay.width,
-          height: overlay.height,
-          score: overlay.score ?? 0,
-        },
-        { r: 59, g: 130, b: 246, a: 128 }
-      );
-      const overlayImageData = ctx.createImageData(pixels.width, pixels.height);
-      overlayImageData.data.set(pixels.data);
-
-      const offscreen = document.createElement("canvas");
-      offscreen.width = pixels.width;
-      offscreen.height = pixels.height;
-      const offCtx = offscreen.getContext("2d");
-      if (offCtx) {
-        offCtx.putImageData(overlayImageData, 0, 0);
-        ctx.drawImage(offscreen, 0, 0, canvas.width, canvas.height);
+    const overlays = result?.overlays ?? [];
+    overlays.forEach((overlay, index) => {
+      if (isMaskOverlay(overlay)) {
+        drawMaskLikeOverlay(
+          ctx,
+          canvas,
+          { data: overlay.data, width: overlay.width, height: overlay.height },
+          overlay.score ?? 0,
+          MASK_COLOR
+        );
+        return;
       }
-    }
-  }, [image, result]);
+
+      if (isBoxOverlay(overlay)) {
+        const isHighlighted = index === highlightedOverlayIndex;
+        if (overlay.mask) {
+          drawMaskLikeOverlay(
+            ctx,
+            canvas,
+            overlay.mask,
+            overlay.score ?? 0,
+            isHighlighted ? BOX_HIGHLIGHT_COLOR : BOX_COLOR
+          );
+        }
+        ctx.strokeStyle = isHighlighted ? "#facc15" : "rgba(255, 255, 255, 0.85)";
+        ctx.lineWidth = isHighlighted ? 3 : 1.5;
+        ctx.strokeRect(overlay.x, overlay.y, overlay.width, overlay.height);
+      }
+    });
+  }, [image, result, highlightedOverlayIndex]);
 
   const handleClick = useCallback(
     (event: MouseEvent<HTMLImageElement>) => {
@@ -148,7 +206,7 @@ export function ModelLabResultView({
             className="mt-3 text-sm text-muted-foreground"
             data-testid="model-lab-click-hint"
           >
-            画像をクリックすると、その位置でマスクを推論します
+            {clickHintText}
           </p>
         )}
         {!onImageClick && !result && (

@@ -31,6 +31,16 @@ export interface ModelLabBoxOverlay {
   height: number;
   label?: string;
   score?: number;
+  /**
+   * インスタンスの二値マスク（issue #49, YOLO11n-seg で実装）。ある場合は元画像と
+   * 同じ width/height（`kind: "mask"` の `ModelLabMaskOverlay` と同じ形式）。
+   * 全自動検出系モデルの中にはボックスのみを返すものもあるため任意フィールドとする。
+   */
+  mask?: {
+    data: Uint8Array;
+    width: number;
+    height: number;
+  };
 }
 
 export type ModelLabOverlay = ModelLabMaskOverlay | ModelLabBoxOverlay;

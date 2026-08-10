@@ -153,4 +153,115 @@ describe("ModelLabResultView", () => {
     expect(screen.getByTestId("model-lab-click-hint")).toBeInTheDocument();
     expect(screen.queryByTestId("model-lab-result-empty")).not.toBeInTheDocument();
   });
+
+  it("clickHintText を渡すと既定文言の代わりにその文言を表示する（issue #49）", () => {
+    render(
+      <ModelLabResultView
+        image={image}
+        onImageClick={vi.fn()}
+        clickHintText="クリックでインスタンスを選択します"
+      />
+    );
+
+    expect(screen.getByTestId("model-lab-click-hint")).toHaveTextContent(
+      "クリックでインスタンスを選択します"
+    );
+  });
+
+  it("kind: box のオーバーレイがあるとき枠線を描画する（issue #49）", () => {
+    const strokeRect = vi.fn();
+    HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
+      drawImage: vi.fn(),
+      putImageData: vi.fn(),
+      clearRect: vi.fn(),
+      strokeRect,
+      createImageData: vi.fn((w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+        width: w,
+        height: h,
+      })),
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const result: ModelLabResult = {
+      modelId: "yolo11n-seg",
+      overlays: [
+        { kind: "box", x: 0, y: 0, width: 1, height: 1, label: "person", score: 0.9 },
+      ],
+    };
+    render(<ModelLabResultView image={image} result={result} />);
+
+    expect(strokeRect).toHaveBeenCalledWith(0, 0, 1, 1);
+  });
+
+  it("kind: box に mask が付いているとき塗りつぶしも描画する（issue #49）", () => {
+    const drawImage = vi.fn();
+    HTMLCanvasElement.prototype.getContext = vi.fn().mockReturnValue({
+      drawImage,
+      putImageData: vi.fn(),
+      clearRect: vi.fn(),
+      strokeRect: vi.fn(),
+      createImageData: vi.fn((w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+        width: w,
+        height: h,
+      })),
+    }) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const result: ModelLabResult = {
+      modelId: "yolo11n-seg",
+      overlays: [
+        {
+          kind: "box",
+          x: 0,
+          y: 0,
+          width: 1,
+          height: 1,
+          score: 0.9,
+          mask: { data: new Uint8Array([1]), width: 1, height: 1 },
+        },
+      ],
+    };
+    render(<ModelLabResultView image={image} result={result} />);
+
+    expect(drawImage).toHaveBeenCalled();
+  });
+
+  it("highlightedOverlayIndex と一致する box オーバーレイは異なる色で強調描画する（issue #49）", () => {
+    const strokeRectCalls: unknown[] = [];
+    const strokeStyleValues: string[] = [];
+    const ctx = {
+      drawImage: vi.fn(),
+      putImageData: vi.fn(),
+      clearRect: vi.fn(),
+      strokeRect: vi.fn((...args: unknown[]) => {
+        strokeRectCalls.push(args);
+        strokeStyleValues.push((ctx as unknown as { strokeStyle: string }).strokeStyle);
+      }),
+      createImageData: vi.fn((w: number, h: number) => ({
+        data: new Uint8ClampedArray(w * h * 4),
+        width: w,
+        height: h,
+      })),
+      strokeStyle: "",
+      lineWidth: 0,
+    };
+    HTMLCanvasElement.prototype.getContext = vi
+      .fn()
+      .mockReturnValue(ctx) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+
+    const result: ModelLabResult = {
+      modelId: "yolo11n-seg",
+      overlays: [
+        { kind: "box", x: 0, y: 0, width: 1, height: 1, score: 0.9 },
+        { kind: "box", x: 1, y: 1, width: 1, height: 1, score: 0.8 },
+      ],
+    };
+    render(
+      <ModelLabResultView image={image} result={result} highlightedOverlayIndex={1} />
+    );
+
+    expect(strokeRectCalls).toHaveLength(2);
+    // ハイライト対象(index=1)の strokeStyle は非ハイライト(index=0)と異なる
+    expect(strokeStyleValues[0]).not.toBe(strokeStyleValues[1]);
+  });
 });

@@ -1,0 +1,49 @@
+smart-object-select bundles model files derived from the following third-party model.
+
+Model: yolo11n-seg
+Source: https://huggingface.co/mobilint/YOLO11n-seg
+  (unmodified fp32 ONNX export of YOLO11n-seg, published by mobilint as the
+  pre-quantization input to their NPU compilation pipeline; the `.mxq` NPU-specific
+  files in that repository are NOT used by this application)
+Original model: https://github.com/ultralytics/ultralytics (YOLO11n-seg, COCO-pretrained,
+  80-class instance segmentation)
+  Ultralytics YOLO11 weights and code are licensed under the GNU Affero General Public
+  License v3.0 (AGPL-3.0) (https://github.com/ultralytics/ultralytics/blob/main/LICENSE).
+
+License:
+  This model (both the original Ultralytics YOLO11n-seg weights and the mobilint ONNX
+  export republishing them, which itself declares `license: agpl-3.0` in its Hugging
+  Face repository card metadata) is licensed under AGPL-3.0. A copy of the AGPL-3.0
+  license text is included at the repository root (`LICENSE`); this repository (this
+  smart-object-select project) is published as AGPL-3.0 in full to satisfy this
+  requirement (source-available on GitHub, including when accessed over a network,
+  per AGPL-3.0 Section 13). This decision was confirmed with the repository owner
+  (issue #45 Decision Log #4, issue #49).
+
+  Unlike MobileSAM (Apache-2.0, public/models/mobile-sam/NOTICE) and EdgeSAM (S-Lab
+  License 1.0 / non-commercial, public/models/edge-sam/NOTICE), YOLO11n-seg's AGPL-3.0
+  is a copyleft (not permissive, not non-commercial-only) license: commercial use is
+  allowed, but any distribution (including network use, i.e. running this app as a
+  service) requires making the complete corresponding source code available under
+  AGPL-3.0. This repository being fully public on GitHub satisfies that requirement.
+
+Files included:
+  - yolo11n-seg.onnx (fp32 ONNX export; input tensor `input` [batch, 3, 640, 640],
+    output tensors of shape [1, 116, 8400] (4 box + 80 COCO class scores + 32 mask
+    coefficients per detection candidate) and [1, 32, 160, 160] (mask prototypes) —
+    this app's decoder (src/lib/modelLab/yolo11nSeg/postprocess.ts) reads outputs by
+    shape, not by name, since the exact output tensor names differ slightly from the
+    "vanilla" Ultralytics `yolo export format=onnx` naming (`output0`/`output1`) while
+    the numerical content and shapes are identical).
+
+Changes made:
+  - No modification was made to the file contents. The file was copied verbatim from
+    the upstream Hugging Face repository into public/models/yolo11n-seg/ so that
+    smart-object-select can serve the model from its own origin instead of fetching it
+    from the Hugging Face Hub at runtime.
+
+Scope limitation (see issue #49, parent #45):
+  - This model is a closed-set detector trained only on the 80 COCO classes. It cannot
+    detect or segment arbitrary objects outside that class set. This limitation is
+    surfaced in the Model Lab UI (src/pages/ModelLabPage.tsx) whenever YOLO11n-seg is
+    the selected model.
