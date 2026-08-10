@@ -65,19 +65,36 @@ export const FASTSAM_CONFIDENCE_THRESHOLD = 0.4;
 export const FASTSAM_IOU_THRESHOLD = 0.9;
 
 /**
+ * NMS **後**の最終検出数の上限（スコア降順で上位のみ残す）。
+ * Ultralytics 公式実装の `max_det`（NMS 後の最終検出数上限、既定 300）と同じ値・同じ適用位置。
+ *
+ * 🔴 NMS **前**に適用してはいけない（issue #50 codex レビュー指摘 P2）。NMS 前に適用すると、
+ * 同一物体の高スコアな重複候補（IoU が高い、ほぼ同じ位置の別候補）だけで上位枠を占められた
+ * 画像で、NMS により重複が除去された後も「別の物体」の候補は復元されず、最終検出数が
+ * 本来より少なくなる（検出漏れ）。`decodeFastSamOutputs` は `nms()` の呼び出し時にこの値を
+ * 渡し、NMS が生き残らせた（＝重複を除去済みの）候補の中から上位 `FASTSAM_MAX_DETECTIONS`
+ * 件のみを最終結果とする。
+ *
+ * NMS **前**の候補数（O(n^2) の NMS 自体のコスト）を絞る目的には、別の
+ * `FASTSAM_MAX_NMS_CANDIDATES`（本来の検出数を保つため、この値より大幅に大きい）を使う。
+ */
+export const FASTSAM_MAX_DETECTIONS = 300;
+
+/**
  * 信頼度閾値通過後、NMS に渡す前に採用する候補数の上限（スコア降順で上位のみ残す）。
- * Ultralytics 公式実装の `max_det`（NMS 後の最終検出数上限、既定 300）に倣う値。
+ * `FASTSAM_MAX_DETECTIONS`（NMS 後の最終検出数上限）とは**別物**で、目的は NMS
+ * 自体のコストの上限化のみ（issue #50 codex レビュー指摘 P2: 最終検出数上限をこの
+ * 用途に流用すると検出漏れが起きるため、意図的に大きく・別の定数として用意する）。
  *
  * FastSAM は class-agnostic な "segment everything" モデルで、IoU 閾値も 0.9 と高い
  * （＝ほぼ抑制されない）ため、複雑な画像では信頼度閾値通過後の候補が数千件規模になりうる。
- * この実装の `nms()` は O(n^2) の素朴な貪欲法であり、かつ NMS 通過後の各候補について
- * 256x256x32 のマスク復号＋元画像へのアップサンプリングを行う（`decodeInstanceMask` 参照）
- * ため、候補数を絞らないと NMS 自体のコストと後段のマスク復号コストの両方が線形以上に
- * 膨張し、Worker が長時間ブロックしうる（issue #50 codex レビュー指摘）。
- * `decodeDetections` が信頼度閾値通過後にスコア降順で上位 `FASTSAM_MAX_DETECTIONS` 件へ
- * 打ち切ることで、NMS の入力サイズとマスク復号回数の両方をこの値で上限化する。
+ * この実装の `nms()` は O(n^2) の素朴な貪欲法のため、モデル出力の理論上限
+ * （`output0` の候補数次元、`fastsam_s.onnx` で 21504）をそのまま NMS に渡しても
+ * 現実的な時間（実測 1.4秒程度、21504候補全生存という最悪ケースで）で完了することを
+ * 確認済みだが、将来 FastSAM の別バリアント（候補数がより多いモデル）に切り替わった場合の
+ * 安全マージンとして、実運用で想定される物体数（数百件規模）より一桁大きい値を設定する。
  */
-export const FASTSAM_MAX_DETECTIONS = 300;
+export const FASTSAM_MAX_NMS_CANDIDATES = 5000;
 
 /** マスクロジットの二値化閾値。sigmoid(logit) > この値を前景とする（Ultralytics 既定値と同じ 0.5）。 */
 export const FASTSAM_MASK_THRESHOLD = 0.5;

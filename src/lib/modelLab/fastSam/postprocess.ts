@@ -6,6 +6,7 @@ import {
   FASTSAM_MASK_PROTO_SIZE,
   FASTSAM_MASK_THRESHOLD,
   FASTSAM_MAX_DETECTIONS,
+  FASTSAM_MAX_NMS_CANDIDATES,
 } from "./constants";
 import { mapBoxToOriginal, type BoxXywh, type LetterboxTransform } from "./preprocess";
 import type { FastSamDetection } from "./types";
@@ -25,11 +26,15 @@ export interface DecodeDetectionsOptions {
   confidenceThreshold?: number;
   /**
    * 信頼度閾値通過後、NMS に渡す前に採用する候補数の上限（スコア降順で上位のみ残す）。
-   * 省略時は `FASTSAM_MAX_DETECTIONS`。詳細は `constants.ts` のコメント参照
-   * （issue #50 codex レビュー指摘: NMS の O(n^2) コストとマスク復号コストの両方を
-   * 候補数で上限化する）。
+   * 省略時は `FASTSAM_MAX_NMS_CANDIDATES`。**これは最終検出数の上限ではない**
+   * （最終検出数の上限は `FASTSAM_MAX_DETECTIONS`。`decodeFastSamOutputs` が
+   * `nms()` 呼び出し時に別途適用する。issue #50 codex レビュー指摘 P2: 最終検出数の
+   * 上限を NMS 前に適用すると、同一物体の重複候補が上位を占める画像で「別の物体」の
+   * 候補が復元不能に失われ検出漏れになるため、この2つの上限は明確に分離する）。
+   * ここでの上限は純粋に NMS 自体（O(n^2) の素朴な貪欲法）のコストを抑えるためのもので、
+   * `FASTSAM_MAX_DETECTIONS` より大幅に大きい値を既定とする。
    */
-  maxDetections?: number;
+  maxCandidates?: number;
 }
 
 /**
@@ -48,12 +53,12 @@ export interface DecodeDetectionsOptions {
  * onnxruntime-node での実測により既に sigmoid 適用済み（0-1 に収まる）ことを確認済みのため、
  * ここで追加の sigmoid は適用しない（`public/models/fast-sam/NOTICE` 参照）。
  *
- * 信頼度閾値通過後の候補が `maxDetections`（既定 `FASTSAM_MAX_DETECTIONS`）を超える場合、
- * スコア降順で上位のみに打ち切る。FastSAM は class-agnostic な "segment everything" モデルで
- * IoU 閾値も 0.9 と高い（＝ほぼ抑制されない）ため、複雑な画像では信頼度閾値通過後の候補が
- * 数千件規模になりうる。ここで打ち切らないと、後段の `nms()`（O(n^2) の素朴な貪欲法）と
- * `decodeInstanceMask()`（各候補ごとに 256x256x32 の内積＋アップサンプリング）の両方の
- * コストが線形以上に膨張し、Worker が長時間ブロックしうる（issue #50 codex レビュー指摘）。
+ * 信頼度閾値通過後の候補が `maxCandidates`（既定 `FASTSAM_MAX_NMS_CANDIDATES`）を超える場合、
+ * スコア降順で上位のみに打ち切る。これは NMS 自体（O(n^2) の素朴な貪欲法）のコストを
+ * 抑えるためだけの上限であり、**最終検出数の上限ではない**（issue #50 codex レビュー指摘
+ * P2）。最終検出数の上限（`FASTSAM_MAX_DETECTIONS`）は NMS の**後**に別途適用される
+ * （`decodeFastSamOutputs`/`nms()` 参照）。NMS 前にこの2つを混同して同じ値を適用すると、
+ * 同一物体の重複候補が上位を占める画像で「別の物体」の候補が復元不能に失われ検出漏れになる。
  */
 export function decodeDetections(
   output: Float32Array,
@@ -62,7 +67,7 @@ export function decodeDetections(
 ): RawDetection[] {
   const maskProtoChannels = options.maskProtoChannels ?? FASTSAM_MASK_PROTO_CHANNELS;
   const confidenceThreshold = options.confidenceThreshold ?? FASTSAM_CONFIDENCE_THRESHOLD;
-  const maxDetections = options.maxDetections ?? FASTSAM_MAX_DETECTIONS;
+  const maxCandidates = options.maxCandidates ?? FASTSAM_MAX_NMS_CANDIDATES;
 
   const [, predLen, numCandidates] = dims;
   const expectedPredLen = 4 + 1 + maskProtoChannels;
@@ -99,13 +104,13 @@ export function decodeDetections(
     });
   }
 
-  if (detections.length <= maxDetections) {
+  if (detections.length <= maxCandidates) {
     return detections;
   }
 
-  // NMS・マスク復号のコストを上限化するため、スコア降順で上位 maxDetections 件のみ残す
-  // （Ultralytics 公式実装の `max_det` に倣う。issue #50 codex レビュー指摘）。
-  return detections.sort((a, b) => b.score - a.score).slice(0, maxDetections);
+  // NMS 自体の O(n^2) コストを上限化するため、スコア降順で上位 maxCandidates 件のみ
+  // NMS に渡す（最終検出数の上限ではない点に注意。上記コメント参照）。
+  return detections.sort((a, b) => b.score - a.score).slice(0, maxCandidates);
 }
 
 /** 2つの xywh ボックスの IoU（重なり無しは 0）。 */
@@ -142,15 +147,25 @@ export function computeIoU(a: BoxXywh, b: BoxXywh): number {
  * クラス非依存の貪欲 NMS。スコア降順に走査し、既に採用したボックスと IoU が閾値を超える
  *候補を抑制する。FastSAM は単一クラス（objectness のみ）のため、YOLO11n-seg のような
  * クラス単位（class-aware）の分岐は不要（Ultralytics 公式 FastSAM の `agnostic_nms` 相当）。
+ *
+ * `maxDetections` は **NMS 後**（重複除去後）の最終採用数の上限（Ultralytics 公式実装の
+ * `max_det` と同じ適用位置。省略時は無制限）。`kept.length` がこの値に達した時点でループを
+ * 打ち切る（`sorted` は既にスコア降順のため、これ以降の候補は全てスコアがより低く、
+ * 採用しても結果の先頭 `maxDetections` 件には影響しない。early-break は結果の正しさを
+ * 変えずに、大量候補時の走査コストも削減できる）。
  */
 export function nms(
   detections: readonly RawDetection[],
-  iouThreshold: number = FASTSAM_IOU_THRESHOLD
+  iouThreshold: number = FASTSAM_IOU_THRESHOLD,
+  maxDetections: number = Infinity
 ): RawDetection[] {
   const sorted = [...detections].sort((a, b) => b.score - a.score);
   const kept: RawDetection[] = [];
 
   for (const candidate of sorted) {
+    if (kept.length >= maxDetections) {
+      break;
+    }
     const suppressed = kept.some((k) => computeIoU(k.box, candidate.box) > iouThreshold);
     if (!suppressed) {
       kept.push(candidate);
@@ -259,11 +274,22 @@ export function decodeInstanceMask(
 export interface DecodeFastSamOutputsOptions
   extends DecodeDetectionsOptions, DecodeInstanceMaskOptions {
   iouThreshold?: number;
+  /**
+   * NMS **後**の最終検出数の上限。省略時は `FASTSAM_MAX_DETECTIONS`。
+   * `DecodeDetectionsOptions.maxCandidates`（NMS **前**の候補数上限、目的が異なる）とは
+   * 別物（issue #50 codex レビュー指摘 P2）。
+   */
+  maxDetections?: number;
 }
 
 /**
  * `output0`（検出候補）と `output1`（マスクプロトタイプ）から、NMS 適用済みの
  * インスタンス一覧（元画像座標系のボックス・マスク付き）を組み立てる。
+ *
+ * 最終検出数の上限（`maxDetections`、既定 `FASTSAM_MAX_DETECTIONS`）は `nms()` の呼び出しに
+ * 直接渡し、NMS が重複を除去した**後**の候補に対して適用する（issue #50 codex レビュー
+ * 指摘 P2: `decodeDetections` 側の `maxCandidates`＝NMS 前の候補数上限とは目的が異なり、
+ * NMS 前に最終上限を適用すると検出漏れが起きるため、この2つを混同しない）。
  */
 export function decodeFastSamOutputs(
   detOutput: Float32Array,
@@ -275,7 +301,11 @@ export function decodeFastSamOutputs(
   options: DecodeFastSamOutputsOptions = {}
 ): FastSamDetection[] {
   const raw = decodeDetections(detOutput, detDims, options);
-  const kept = nms(raw, options.iouThreshold ?? FASTSAM_IOU_THRESHOLD);
+  const kept = nms(
+    raw,
+    options.iouThreshold ?? FASTSAM_IOU_THRESHOLD,
+    options.maxDetections ?? FASTSAM_MAX_DETECTIONS
+  );
 
   return kept.map((detection) => {
     const boxOrig = mapBoxToOriginal(

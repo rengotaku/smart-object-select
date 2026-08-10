@@ -8,6 +8,7 @@ import {
   type RawDetection,
 } from "./postprocess";
 import type { LetterboxTransform } from "./preprocess";
+import { FASTSAM_MAX_NMS_CANDIDATES } from "./constants";
 
 /**
  * テスト用に小さい候補数・maskProtoChannels の output0 を組み立てるヘルパー。
@@ -90,8 +91,8 @@ describe("decodeDetections", () => {
     expect(result).toEqual([]);
   });
 
-  it("信頼度閾値通過後の候補が maxDetections を超える場合、スコア上位のみに打ち切る（issue #50 codex レビュー指摘: NMS/マスク復号コストの上限化）", () => {
-    // 5候補が閾値(0.4)を通過するが maxDetections=3 のため上位3件のみ残るはず
+  it("信頼度閾値通過後の候補が maxCandidates を超える場合、スコア上位のみに打ち切る（NMS前段の候補数を絞る目的のみ。issue #50 codex レビュー指摘 P2: 最終検出数の上限ではない）", () => {
+    // 5候補が閾値(0.4)を通過するが maxCandidates=3 のため上位3件のみ残るはず
     const { data, dims } = buildOutput0(1, [
       { cx: 1, cy: 1, w: 1, h: 1, score: 0.5, maskCoeffs: [0] },
       { cx: 2, cy: 2, w: 1, h: 1, score: 0.95, maskCoeffs: [0] },
@@ -103,7 +104,7 @@ describe("decodeDetections", () => {
     const result = decodeDetections(data, dims, {
       maskProtoChannels: 1,
       confidenceThreshold: 0.4,
-      maxDetections: 3,
+      maxCandidates: 3,
     });
 
     expect(result).toHaveLength(3);
@@ -112,7 +113,7 @@ describe("decodeDetections", () => {
     expect(scores.map((s) => Number(s.toFixed(2)))).toEqual([0.99, 0.95, 0.6]);
   });
 
-  it("候補数が maxDetections 以下なら打ち切らない", () => {
+  it("候補数が maxCandidates 以下なら打ち切らない", () => {
     const { data, dims } = buildOutput0(1, [
       { cx: 1, cy: 1, w: 1, h: 1, score: 0.5, maskCoeffs: [0] },
       { cx: 2, cy: 2, w: 1, h: 1, score: 0.6, maskCoeffs: [0] },
@@ -121,20 +122,21 @@ describe("decodeDetections", () => {
     const result = decodeDetections(data, dims, {
       maskProtoChannels: 1,
       confidenceThreshold: 0.4,
-      maxDetections: 3,
+      maxCandidates: 3,
     });
 
     expect(result).toHaveLength(2);
   });
 
-  it("maxDetections を省略すると既定値 FASTSAM_MAX_DETECTIONS(300) が使われる", () => {
-    // 閾値通過候補を301件用意し、既定では300件に打ち切られることを確認する
-    const candidates = Array.from({ length: 301 }, (_, i) => ({
+  it("maxCandidates を省略すると既定値 FASTSAM_MAX_NMS_CANDIDATES が使われる（NMS前段の上限。最終検出数上限の FASTSAM_MAX_DETECTIONS とは別）", () => {
+    // 閾値通過候補を FASTSAM_MAX_NMS_CANDIDATES + 1 件用意し、既定ではその件数に打ち切られることを確認する
+    const total = FASTSAM_MAX_NMS_CANDIDATES + 1;
+    const candidates = Array.from({ length: total }, (_, i) => ({
       cx: i,
       cy: i,
       w: 1,
       h: 1,
-      score: 0.5 + i * 0.0001,
+      score: 0.5 + (i % 1000) * 0.0001,
       maskCoeffs: [0],
     }));
     const { data, dims } = buildOutput0(1, candidates);
@@ -144,7 +146,7 @@ describe("decodeDetections", () => {
       confidenceThreshold: 0.4,
     });
 
-    expect(result).toHaveLength(300);
+    expect(result).toHaveLength(FASTSAM_MAX_NMS_CANDIDATES);
   });
 });
 
@@ -207,6 +209,36 @@ describe("nms", () => {
     const b = makeDetection({ score: 0.8, box: { x: 0, y: 0, width: 10, height: 10 } });
     const result = nms([a, b], 0.3);
     expect(result).toHaveLength(1);
+  });
+
+  it("maxDetections は NMS 後（重複除去後）の採用数に適用する（issue #50 codex レビュー指摘 P2: NMS 前ではない）", () => {
+    // 重ならない4候補（互いに独立した別物体）。iouThreshold=0.3 では何も抑制されないため、
+    // maxDetections を指定しなければ4件全て残るはず。
+    const detections = [
+      makeDetection({ score: 0.4, box: { x: 0, y: 0, width: 10, height: 10 } }),
+      makeDetection({ score: 0.99, box: { x: 100, y: 100, width: 10, height: 10 } }),
+      makeDetection({ score: 0.7, box: { x: 200, y: 200, width: 10, height: 10 } }),
+      makeDetection({ score: 0.6, box: { x: 300, y: 300, width: 10, height: 10 } }),
+    ];
+
+    const unbounded = nms(detections, 0.3);
+    expect(unbounded).toHaveLength(4);
+
+    // maxDetections=2 を指定すると、抑制されずに残った候補のうちスコア上位2件のみになる
+    const bounded = nms(detections, 0.3, 2);
+    expect(bounded).toHaveLength(2);
+    expect(bounded.map((d) => d.score)).toEqual([0.99, 0.7]);
+  });
+
+  it("maxDetections 省略時は無制限（既存呼び出しの後方互換）", () => {
+    const detections = Array.from({ length: 10 }, (_, i) =>
+      makeDetection({
+        score: 1 - i * 0.01,
+        box: { x: i * 100, y: 0, width: 10, height: 10 },
+      })
+    );
+    const result = nms(detections, 0.3);
+    expect(result).toHaveLength(10);
   });
 });
 
@@ -359,5 +391,57 @@ describe("decodeFastSamOutputs", () => {
     // classId/label フィールドを持たない（クラス非依存モデルであることを型・実行時双方で確認）
     expect(result[0]).not.toHaveProperty("classId");
     expect(result[0]).not.toHaveProperty("label");
+  });
+
+  it("最終検出数の上限(maxDetections)はNMS後に適用され、重複候補に埋もれた別物体の検出漏れが起きない（issue #50 codex レビュー指摘 P2の再現・修正確認）", () => {
+    const maskProtoChannels = 1;
+    const maskProtoSize = 4;
+    const inputSize = 16;
+
+    // 物体A: 全く同じボックス(2,2,4,4)を高スコアで3候補分（重複検出、実モデルの
+    // seg-everything が同一物体に複数の重複候補を出す状況を模す）。
+    // 物体B: 別の位置(10,10,4,4)、Aより低スコアだが独立した別物体。
+    const { data: detData, dims: detDims } = buildOutput0(maskProtoChannels, [
+      { cx: 4, cy: 4, w: 4, h: 4, score: 0.99, maskCoeffs: [1] }, // A候補1
+      { cx: 4, cy: 4, w: 4, h: 4, score: 0.98, maskCoeffs: [1] }, // A候補2（Aと同一ボックス）
+      { cx: 4, cy: 4, w: 4, h: 4, score: 0.97, maskCoeffs: [1] }, // A候補3（Aと同一ボックス）
+      { cx: 12, cy: 12, w: 4, h: 4, score: 0.5, maskCoeffs: [1] }, // B（Aと重ならない別物体）
+    ]);
+
+    const proto = new Float32Array(
+      maskProtoChannels * maskProtoSize * maskProtoSize
+    ).fill(10); // 全面前景ロジット
+
+    const transform: LetterboxTransform = {
+      scale: 1,
+      padX: 0,
+      padY: 0,
+      resizedWidth: inputSize,
+      resizedHeight: inputSize,
+    };
+
+    // maxDetections=2（NMS後の最終上限）。もし maxDetections がNMS**前**に誤って適用されると
+    // （旧実装のバグ）、スコア上位2件(A候補1, A候補2)は共に物体Aの重複でNMS前に打ち切りが
+    // 起き、その時点でB候補は候補集合から消えている。NMS後、A候補1のみ残り最終結果は1件
+    // （Bを含まない・検出漏れ）になってしまう。
+    // 修正後の正しい挙動: NMSは全4候補に対して先に走る → 物体AはIoU抑制で1件に集約され、
+    // 独立したBはそのまま残る（NMS後の中間結果は [A, B] の2件）→ maxDetections=2 は
+    // ちょうど2件なのでどちらも失われず、最終結果は物体Aと物体Bの両方を含む2件になる。
+    const result = decodeFastSamOutputs(detData, detDims, proto, transform, 16, 16, {
+      maskProtoChannels,
+      maskProtoSize,
+      inputSize,
+      confidenceThreshold: 0.4,
+      iouThreshold: 0.5,
+      maxDetections: 2,
+    });
+
+    expect(result).toHaveLength(2);
+    const scores = result.map((d) => Number(d.score.toFixed(2))).sort((a, b) => b - a);
+    // 物体A（0.99、重複はNMSで1件に集約）と物体B（0.5）の両方が残っている
+    // （検出漏れが起きていないことの直接的な検証）。
+    expect(scores).toEqual([0.99, 0.5]);
+    const boxes = result.map((d) => `${d.box.x},${d.box.y}`).sort();
+    expect(boxes).toEqual(["10,10", "2,2"]);
   });
 });
