@@ -31,7 +31,13 @@ function revokeObjectUrl(url: string | undefined) {
  */
 export function ModelLabPage() {
   const [image, setImageState] = useState<LoadedImage | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState("");
+  // ModelLabRegistry にモデルが1件でも登録されていれば、その先頭を初期選択にする。
+  // 空文字のまま初期化すると、レジストリが1件だけの場合ブラウザは先頭 <option> を
+  // 視覚的に選択表示する一方 selectedModelId（React state）は空文字のまま乖離し、
+  // ユーザーが select を操作しない限り onChange が発火せず不整合が解消されない。
+  const [selectedModelId, setSelectedModelId] = useState(
+    () => ModelLabRegistry[0]?.id ?? ""
+  );
   // 直近の image を同期的に保持する ref。setState は非同期に反映されるため、
   // アンマウント時 cleanup やハンドラ内で「今どの Object URL が生きているか」を
   // 正確に参照するには state ではなく ref が必要（useSegmentation.ts と同じ理由）。
