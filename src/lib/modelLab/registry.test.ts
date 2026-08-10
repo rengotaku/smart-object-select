@@ -2,9 +2,14 @@ import { describe, it, expect } from "vitest";
 import { ModelLabRegistry, type ModelLabDescriptor } from "./registry";
 
 describe("ModelLabRegistry", () => {
-  it("is an array (拡張ポイント) — 本 sub-issue の時点では空配列", () => {
+  it("is an array (拡張ポイント)", () => {
     expect(Array.isArray(ModelLabRegistry)).toBe(true);
-    expect(ModelLabRegistry).toHaveLength(0);
+  });
+
+  it("mobile-sam（issue #47）が登録されている", () => {
+    const mobileSam = ModelLabRegistry.find((model) => model.id === "mobile-sam");
+    expect(mobileSam).toBeDefined();
+    expect(mobileSam?.name).toBe("MobileSAM");
   });
 
   it("ModelLabDescriptor を要素として追加できる形になっている（型レベルの拡張性確認）", () => {
@@ -12,13 +17,13 @@ describe("ModelLabRegistry", () => {
     // 型と実行時の両方で確認する（コンパイルが通ること自体がこのテストの主眼）。
     const extended: ModelLabDescriptor[] = [
       ...ModelLabRegistry,
-      { id: "mobile-sam", name: "MobileSAM", description: "軽量版SAM" },
+      { id: "edge-sam", name: "EdgeSAM", description: "軽量版SAM" },
     ];
 
-    expect(extended).toHaveLength(1);
-    expect(extended[0]).toEqual({
-      id: "mobile-sam",
-      name: "MobileSAM",
+    expect(extended).toHaveLength(ModelLabRegistry.length + 1);
+    expect(extended.at(-1)).toEqual({
+      id: "edge-sam",
+      name: "EdgeSAM",
       description: "軽量版SAM",
     });
   });

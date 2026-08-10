@@ -1,0 +1,54 @@
+smart-object-select bundles model files derived from the following third-party model.
+
+Model: mobile-sam
+Source: https://huggingface.co/Acly/MobileSAM
+  (ONNX export of MobileSAM, published by Acly)
+Original model: https://github.com/ChaoningZhang/MobileSAM
+  (MobileSAM weights, licensed under the Apache License, Version 2.0)
+
+License:
+  This bundle is subject to two licenses:
+
+  1. The original MobileSAM model (the weights these ONNX files were exported from)
+     is licensed under the Apache License, Version 2.0
+     (https://github.com/ChaoningZhang/MobileSAM/blob/master/LICENSE). A copy of the
+     Apache License, Version 2.0 is included in this repository at
+     public/models/LICENSE-APACHE-2.0.txt (Section 4(a) requirement of that license),
+     and can also be obtained at https://www.apache.org/licenses/LICENSE-2.0. This
+     NOTICE is provided pursuant to Section 4(d) of that license.
+
+  2. The Acly/MobileSAM Hugging Face repository that produced this ONNX export
+     additionally declares its own contribution under the MIT License (see the
+     repository's model card metadata: https://huggingface.co/Acly/MobileSAM/raw/main/README.md).
+     The MIT License text is reproduced below as required by that license.
+
+Files included (unmodified from the upstream repository):
+  - mobile_sam_image_encoder.onnx
+  - sam_mask_decoder_single.onnx
+
+Changes made:
+  - No modification was made to the file contents. Only the ONNX weight files (not the
+    Python export scripts also published in that repository) actually loaded by this
+    application were selected and copied verbatim into public/models/mobile-sam/ so
+    that smart-object-select can serve the model from its own origin instead of
+    fetching it from the Hugging Face Hub at runtime.
+
+--- MIT License (Acly/MobileSAM ONNX export) ---
+
+Copyright (c) Acly (https://huggingface.co/Acly)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this
+software and associated documentation files (the "Software"), to deal in the Software
+without restriction, including without limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons
+to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE
+FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.

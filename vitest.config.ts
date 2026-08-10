@@ -30,6 +30,10 @@ export default defineConfig({
         // Cannot be exercised in jsdom (no real Worker runtime); the routed
         // logic (samWorkerHandler.ts) is unit-tested directly instead.
         "src/lib/sam/sam.worker.ts",
+        // Same reason as sam.worker.ts above, for the MobileSAM worker entry
+        // point (issue #47). The routed logic (mobileSamWorkerHandler.ts) is
+        // unit-tested directly instead.
+        "src/lib/modelLab/mobileSam/mobileSam.worker.ts",
         // Thin adapter around the real @huggingface/transformers package.
         // Importing the real package in tests would pull model weights and
         // make CI slow/flaky; samSession.ts is tested against a fake
