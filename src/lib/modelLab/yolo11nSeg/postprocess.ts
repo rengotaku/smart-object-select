@@ -153,16 +153,15 @@ export interface DecodeInstanceMaskOptions {
 /**
  * 1インスタンス分のマスクをデコードし、バウンディングボックス範囲のみの二値マスクへ変換する。
  *
- * マスクプロトタイプ（`[maskProtoChannels, maskProtoSize, maskProtoSize]`）と
+ * マスクプロトタイプ（`[maskProtoChannels, maskProtoSize, maskProtoSize]`。既定 160x160）と
  * マスク係数（長さ maskProtoChannels）の内積 → sigmoid → 閾値二値化、という
- * Ultralytics の `process_mask` と同じ手順を、バウンディングボックス内の元画像ピクセルに
- * 対してのみ計算する（ボックス外は常に0。Ultralytics もマスクをボックスでクロップするため
- * 同じ結果になり、かつ全画面走査より大幅に高速）。
- *
- * 返すマスクデータは元画像全体のサイズ（`originalWidth * originalHeight`）ではなく、
- * バウンディングボックス範囲のみを保持する（`width` x `height`、`x`/`y` は元画像座標系での
- * 左上オフセット）。高解像度画像で検出数が多い場合、フル解像度マスクを検出ごとに確保すると
- * メモリを圧迫し Worker→メインスレッド間の転送量も膨らむため（issue #49 codex レビュー指摘）。
+ * Ultralytics の `process_mask` と同じ手順を **プロトタイプ空間（160x160）でのみ**行い、
+ * その結果を元画像のボックス座標系へ最近傍アップサンプリングする（issue #49 codex レビュー
+ * 指摘: 元画像のボックス内ピクセルごとに内積計算をすると、12MP画像を覆う検出1件だけで
+ * `ボックス内ピクセル数 × maskProtoChannels` ≈ 数億回の積和になり Worker が長時間ブロックする。
+ * プロトタイプ空間はどれだけ元画像が高解像度でも最大 `maskProtoSize^2 × maskProtoChannels`
+ * ≈ 82万回の積和で済み、アップサンプリング側は最近傍のルックアップのみ（チャンネルループなし）
+ * のため軽い）。
  */
 export function decodeInstanceMask(
   protoData: Float32Array,
@@ -190,24 +189,50 @@ export function decodeInstanceMask(
   const height = Math.max(0, y1 - y0);
   const data = new Uint8Array(width * height);
 
-  for (let oy = y0; oy < y1; oy++) {
-    const iy = oy * transform.scale + transform.padY;
-    const py = Math.min(maskProtoSize - 1, Math.max(0, Math.floor(iy * protoScale)));
-    const localY = oy - y0;
+  if (width === 0 || height === 0) {
+    return { data, width, height, x: x0, y: y0 };
+  }
 
-    for (let ox = x0; ox < x1; ox++) {
-      const ix = ox * transform.scale + transform.padX;
-      const px = Math.min(maskProtoSize - 1, Math.max(0, Math.floor(ix * protoScale)));
+  const toProtoIndex = (originalCoord: number, scaleOffset: number): number => {
+    const modelSpace = originalCoord * transform.scale + scaleOffset;
+    return Math.min(maskProtoSize - 1, Math.max(0, Math.floor(modelSpace * protoScale)));
+  };
 
+  // 1. プロトタイプ空間でボックスが覆う範囲を求める（transform は等方スケール+パディングの
+  //    アフィン変換で scale > 0 のため、oy/ox に対し単調増加。両端の座標だけで範囲が確定する）。
+  const protoY0 = toProtoIndex(y0, transform.padY);
+  const protoY1 = toProtoIndex(y1 - 1, transform.padY);
+  const protoX0 = toProtoIndex(x0, transform.padX);
+  const protoX1 = toProtoIndex(x1 - 1, transform.padX);
+  const protoCropWidth = protoX1 - protoX0 + 1;
+  const protoCropHeight = protoY1 - protoY0 + 1;
+
+  // 2. プロトタイプ空間の範囲内だけ内積→sigmoid→二値化する（重い計算はここだけに閉じ込める）。
+  const protoMask = new Uint8Array(protoCropWidth * protoCropHeight);
+  for (let py = protoY0; py <= protoY1; py++) {
+    const localPy = py - protoY0;
+    for (let px = protoX0; px <= protoX1; px++) {
       const pixelIndex = py * maskProtoSize + px;
       let logit = 0;
       for (let c = 0; c < maskProtoChannels; c++) {
         logit += protoData[c * protoPixelCount + pixelIndex] * maskCoeffs[c];
       }
       const probability = 1 / (1 + Math.exp(-logit));
-      if (probability > maskThreshold) {
-        data[localY * width + (ox - x0)] = 1;
-      }
+      protoMask[localPy * protoCropWidth + (px - protoX0)] =
+        probability > maskThreshold ? 1 : 0;
+    }
+  }
+
+  // 3. 元画像のボックス範囲へ最近傍アップサンプリング（チャンネルループを含まないため軽い）。
+  for (let oy = y0; oy < y1; oy++) {
+    const py = toProtoIndex(oy, transform.padY);
+    const localPy = py - protoY0;
+    const localY = oy - y0;
+
+    for (let ox = x0; ox < x1; ox++) {
+      const px = toProtoIndex(ox, transform.padX);
+      const localPx = px - protoX0;
+      data[localY * width + (ox - x0)] = protoMask[localPy * protoCropWidth + localPx];
     }
   }
 
