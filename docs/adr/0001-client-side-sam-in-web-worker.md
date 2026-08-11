@@ -1,8 +1,8 @@
 ---
 adr: 0001
 title: SAM 推論をブラウザ内 Web Worker で実行する
-status: accepted
-superseded_by: null
+status: superseded
+superseded_by: 8
 date: 2026-08-06
 issues: [1, 2]
 tags: [sam, web-worker, webgpu, wasm, transformers]

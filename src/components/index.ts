@@ -1,9 +1,5 @@
 export { Layout } from "./Layout";
-export { ImageDropzone, type ImageDropzoneProps } from "./segment/ImageDropzone";
-export { SegmentCanvas, type SegmentCanvasProps } from "./segment/SegmentCanvas";
-export { ExportBar, type ExportBarProps } from "./segment/ExportBar";
-export { LayerPanel, type LayerPanelProps } from "./segment/LayerPanel";
-export { CandidatePicker, type CandidatePickerProps } from "./segment/CandidatePicker";
+export { ImageDropzone, type ImageDropzoneProps } from "./ImageDropzone";
 export {
   ModelLabResultView,
   type ModelLabResultViewProps,

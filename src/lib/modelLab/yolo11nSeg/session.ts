@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import {
   YOLO11N_SEG_INPUT_NAME,
   YOLO11N_SEG_INPUT_SIZE,

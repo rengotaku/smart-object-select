@@ -7,9 +7,9 @@ describe("App", () => {
     window.history.pushState({}, "", "/");
   });
 
-  it("redirects the root path to the segment page", () => {
+  it("redirects the root path to the Model Lab page (issue #59: Model Lab-only scope)", () => {
     render(<App />);
-    expect(screen.getByRole("heading", { name: "Segment" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Model Lab" })).toBeInTheDocument();
   });
 
   it("renders the app title in the header", () => {

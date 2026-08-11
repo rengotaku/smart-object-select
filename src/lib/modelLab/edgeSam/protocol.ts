@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 /**
  * EdgeSAM を Web Worker 上で実行するための request/response（id 相関）。

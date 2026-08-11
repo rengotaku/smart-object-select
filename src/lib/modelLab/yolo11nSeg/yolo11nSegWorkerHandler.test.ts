@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import { YOLO11N_SEG_MODEL_URL } from "./constants";
 import { createYolo11nSegWorkerHandler } from "./yolo11nSegWorkerHandler";
 import type { Yolo11nSegInferenceSession, Yolo11nSegRuntime } from "./onnxRuntime";

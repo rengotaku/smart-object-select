@@ -4,7 +4,7 @@ import {
   type FastSamDetection,
   type FastSamWorkerClient,
 } from "@/lib/modelLab/fastSam";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 export type FastSamStatus = "idle" | "loading" | "detecting" | "ready" | "error";
 

@@ -4,7 +4,7 @@ import {
   type Yolo11nSegDetection,
   type Yolo11nSegWorkerClient,
 } from "@/lib/modelLab/yolo11nSeg";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 export type Yolo11nSegStatus = "idle" | "loading" | "detecting" | "ready" | "error";
 

@@ -1,8 +1,8 @@
 ---
 adr: 0004
 title: SlimSAM-77-uniform の ONNX グラフは box 入力を持たない
-status: accepted
-superseded_by: null
+status: superseded
+superseded_by: 8
 date: 2026-08-06
 issues: [9]
 tags: [sam, onnx, model-constraint, transformers-js, box-prompt]

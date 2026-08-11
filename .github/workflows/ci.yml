@@ -50,28 +50,3 @@ jobs:
 
       - name: Build
         run: npm run build
-
-  server-test:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v6
-
-      - name: Use Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version-file: .node-version
-          cache: 'npm'
-          cache-dependency-path: server/package-lock.json
-
-      - name: Install server dependencies
-        working-directory: server
-        run: npm ci
-
-      - name: Type check
-        working-directory: server
-        run: npm run typecheck
-
-      - name: Test
-        working-directory: server
-        run: npm test

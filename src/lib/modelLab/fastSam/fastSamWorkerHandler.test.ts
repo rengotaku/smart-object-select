@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import { FASTSAM_MODEL_URL } from "./constants";
 import { createFastSamWorkerHandler } from "./fastSamWorkerHandler";
 import type { FastSamInferenceSession, FastSamRuntime } from "./onnxRuntime";

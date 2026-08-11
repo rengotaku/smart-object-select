@@ -2,7 +2,7 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { useEdgeSam } from "./useEdgeSam";
 import type { EdgeSamMaskResult, EdgeSamWorkerClient } from "@/lib/modelLab/edgeSam";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 const DEFAULT_MASK: EdgeSamMaskResult = {
   data: new Uint8Array([1, 1, 1, 1]),

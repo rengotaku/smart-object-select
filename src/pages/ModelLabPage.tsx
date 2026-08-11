@@ -9,7 +9,7 @@ import { useMobileSam } from "@/hooks/useMobileSam";
 import { useEdgeSam } from "@/hooks/useEdgeSam";
 import { useYolo11nSeg } from "@/hooks/useYolo11nSeg";
 import { useFastSam } from "@/hooks/useFastSam";
-import type { LoadedImage } from "@/hooks";
+import type { LoadedImage } from "@/lib/imageLoader";
 import {
   ModelLabRegistry,
   type ModelLabBoxOverlay,
@@ -42,9 +42,8 @@ const FAST_SAM_CLICK_HINT_TEXT =
 
 export interface ModelLabPageProps {
   /**
-   * テストから fake MobileSamWorkerClient を注入するためのフック（SegmentPage の
-   * `createClient` と同じ役割）。省略時は `useMobileSam` の既定
-   * （`mobileSam.worker.ts` を起動する実クライアント）が使われる。
+   * テストから fake MobileSamWorkerClient を注入するためのフック。省略時は
+   * `useMobileSam` の既定（`mobileSam.worker.ts` を起動する実クライアント）が使われる。
    */
   createMobileSamClient?: () => MobileSamWorkerClient;
   /**
@@ -69,8 +68,7 @@ export interface ModelLabPageProps {
 
 /**
  * `fileToLoadedImage`（`ImageDropzone` 経由）が `URL.createObjectURL` で生成した
- * Object URL を解放する。`src/hooks/useSegmentation.ts` の同名パターンに倣い、
- * 未定義環境（テスト等）でも安全に呼べるようガードする。
+ * Object URL を解放する。未定義環境（テスト等）でも安全に呼べるようガードする。
  */
 function revokeObjectUrl(url: string | undefined) {
   if (url && typeof URL !== "undefined" && typeof URL.revokeObjectURL === "function") {
@@ -82,9 +80,8 @@ function revokeObjectUrl(url: string | undefined) {
  * モデル検証用ページ（issue #46, 親 #45）。
  *
  * 却下・保留されたモデル（MobileSAM/EdgeSAM/YOLO11n-seg/FastSAM 等）のうち
- * wasm 対応可能なものを画面上で検証するための実験用ページ。既存の `SegmentPage` /
- * `useSamEngine` / `SamWorkerClient` とは独立しており、本番の実行方式には影響しない
- * （親 #45 Decision Log #3）。
+ * wasm 対応可能なものを画面上で検証するための実験用ページ（親 #45 Decision Log #3）。
+ * issue #59 で本編機能（旧 `/segment`）は削除され、現在は本ページが唯一の機能。
  *
  * MobileSAM（issue #47）: `useMobileSam`（`onnxruntime-web` を直接呼ぶ検証専用実装、
  * `src/lib/modelLab/mobileSam/`）を使い、点クリック→マスク表示のインタラクションで動作する。

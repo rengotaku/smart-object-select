@@ -4,7 +4,7 @@ import {
   type MobileSamMaskResult,
   type MobileSamWorkerClient,
 } from "@/lib/modelLab/mobileSam";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 export type MobileSamStatus = "idle" | "loading" | "segmenting" | "ready" | "error";
 

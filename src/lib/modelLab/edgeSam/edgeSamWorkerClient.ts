@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import type { EdgeSamMaskResult } from "./types";
 import type { EdgeSamWorkerRequest, EdgeSamWorkerResponse } from "./protocol";
 

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ModelLabResultView } from "./ModelLabResultView";
-import type { LoadedImage } from "@/hooks";
+import type { LoadedImage } from "@/lib/imageLoader";
 import type { ModelLabResult } from "@/lib/modelLab";
 
 const image: LoadedImage = {

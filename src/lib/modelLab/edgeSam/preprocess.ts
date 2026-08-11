@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import { EDGE_SAM_INPUT_SIZE } from "./constants";
 
 /**

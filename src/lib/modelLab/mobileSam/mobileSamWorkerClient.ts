@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import type { MobileSamMaskResult } from "./types";
 import type { MobileSamWorkerRequest, MobileSamWorkerResponse } from "./protocol";
 
