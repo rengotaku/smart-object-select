@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import {
   MOBILE_SAM_DECODER_URL,
   MOBILE_SAM_ENCODER_URL,

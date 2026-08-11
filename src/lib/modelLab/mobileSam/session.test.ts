@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import { MOBILE_SAM_DECODER_URL, MOBILE_SAM_ENCODER_URL } from "./constants";
 import type {
   MobileSamInferenceSession,

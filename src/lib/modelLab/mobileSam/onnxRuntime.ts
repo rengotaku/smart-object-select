@@ -1,5 +1,5 @@
 import * as ort from "onnxruntime-web";
-import { resolveSelfHostedWasmPaths } from "@/lib/sam/wasmRuntimePaths";
+import { resolveSelfHostedWasmPaths } from "@/lib/wasmRuntimePaths";
 
 /**
  * `onnxruntime-web` への直接依存はこのファイルにのみ閉じ込める

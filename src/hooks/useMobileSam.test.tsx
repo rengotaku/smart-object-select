@@ -5,7 +5,7 @@ import type {
   MobileSamMaskResult,
   MobileSamWorkerClient,
 } from "@/lib/modelLab/mobileSam";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 const DEFAULT_MASK: MobileSamMaskResult = {
   data: new Uint8Array([1, 1, 1, 1]),

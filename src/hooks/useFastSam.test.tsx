@@ -2,7 +2,7 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { useFastSam } from "./useFastSam";
 import type { FastSamDetection, FastSamWorkerClient } from "@/lib/modelLab/fastSam";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 const DEFAULT_DETECTIONS: FastSamDetection[] = [
   {

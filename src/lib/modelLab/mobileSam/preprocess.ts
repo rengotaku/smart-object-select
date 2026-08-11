@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import { MOBILE_SAM_TARGET_LONG_SIDE } from "./constants";
 
 export interface ResizedDimensions {

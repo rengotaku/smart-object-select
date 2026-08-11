@@ -1,8 +1,8 @@
 ---
 adr: 0002
 title: 非同期待機中の入力変更を世代カウンタで無効化する
-status: accepted
-superseded_by: null
+status: superseded
+superseded_by: 8
 date: 2026-08-06
 issues: [1, 2, 3]
 tags: [race-condition, generation-guard, silent-failure, sam, image-decode]

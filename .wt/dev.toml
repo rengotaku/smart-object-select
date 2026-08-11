@@ -1,14 +1,7 @@
 # wt の dev サーバー定義。`wt serve` / Web の「起動」ボタンで使われる。
-# 各 service には割当ブロックの base+i が割り当てられ、コマンド内の ${port} に
-# 置換される。全 service のポートは WT_PORT_<NAME> env で共有される
-# （web は WT_PORT_SERVER を見てローカル推論サーバーの既定URLを組み立てる。
-# src/pages/SegmentPage.tsx 参照）。
-
-[[services]]
-name = "server"
-cmd = "cd server && npm install --prefer-offline --no-audit --no-fund && SERVER_PORT=${port} npm start"
+# service には割当ブロックの base+i が割り当てられ、コマンド内の ${port} に置換される。
 
 [[services]]
 name = "web"
-cmd = "VITE_SERVER_URL=http://localhost:$WT_PORT_SERVER npm run dev -- --port ${port} --strictPort"
+cmd = "npm run dev -- --port ${port} --strictPort"
 domain = true

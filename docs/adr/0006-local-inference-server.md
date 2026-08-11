@@ -1,8 +1,8 @@
 ---
 adr: 0006
 title: PCローカル推論サーバー（Node.js + onnxruntime-node）を追加し実行方式を選択可能にする
-status: accepted
-superseded_by: null
+status: superseded
+superseded_by: 8
 date: 2026-08-09
 issues: [31, 32, 33, 34]
 tags: [sam, local-server, onnxruntime-node, execution-mode, model-selection]

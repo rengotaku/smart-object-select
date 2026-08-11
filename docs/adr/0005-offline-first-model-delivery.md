@@ -1,8 +1,8 @@
 ---
 adr: 0005
 title: モデル配信をオフライン完結型（自前ホスティング + Service Worker）に切り替える
-status: accepted
-superseded_by: null
+status: superseded
+superseded_by: 8
 date: 2026-08-08
 issues: [10, 21, 22, 23]
 tags: [sam, offline, service-worker, self-hosting, cache-storage, transformers-js]

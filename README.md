@@ -1,5 +1,15 @@
 # smart-object-select
 
+Photoshopの「オブジェクト選択ツール」相当をブラウザだけで実現することを目指していたSPA。
+本編機能（`/segment`）は開発終了に伴い削除され、現在は検証用の **Model Lab**
+（`/model-lab`）のみを残している（issue #59、`docs/adr/0008-scope-reduction-to-model-lab.md`参照）。
+
+## Model Lab とは
+
+MobileSAM・EdgeSAM・YOLO11n-seg・FastSAM の4モデルを、`onnxruntime-web` 直呼び出しで
+ブラウザWASM実行して比較検証するためのページ。バックエンドを持たず、画像・推論結果とも
+一切サーバーへ送信しない。詳細は [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) を参照。
+
 Scaffolded from [my-boilerplate/react-spa](https://github.com/rengotaku/my-boilerplate/tree/main/boilerplates/react-spa).
 
 ## Getting Started
@@ -8,19 +18,6 @@ See the Makefile for available commands:
 
 ```bash
 make help
-```
-
-## PC ローカル推論サーバー（任意）
-
-既定ではブラウザ内蔵（WebGPU/WASM）で推論するが、`/segment` 画面の「実行方式」で
-「PCローカルサーバー」を選ぶと、PC上で別途起動したローカル常駐サーバー（`server/`、
-Node.js + `onnxruntime-node`）に推論を任せられる。手順・API 仕様は
-[`server/README.md`](server/README.md) を参照。
-
-```bash
-cd server
-npm install
-npm start   # http://127.0.0.1:8787 で待ち受け
 ```
 
 ## CI

@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import {
   EDGE_SAM_DECODER_URL,
   EDGE_SAM_ENCODER_URL,

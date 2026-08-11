@@ -25,20 +25,14 @@ describe("Layout", () => {
     expect(screen.getByRole("main")).toBeInTheDocument();
   });
 
-  it("renders navigation links to Segment and Model Lab pages", () => {
+  it("renders no navigation links (single-page app after Model Lab-only scope reduction, issue #59)", () => {
     render(
       <MemoryRouter>
         <Layout />
       </MemoryRouter>
     );
 
-    expect(screen.getByRole("link", { name: "Segment" })).toHaveAttribute(
-      "href",
-      "/segment"
-    );
-    expect(screen.getByRole("link", { name: "Model Lab" })).toHaveAttribute(
-      "href",
-      "/model-lab"
-    );
+    expect(screen.queryByRole("navigation")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });

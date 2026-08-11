@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import type { Yolo11nSegDetection } from "./types";
 import type { Yolo11nSegWorkerRequest, Yolo11nSegWorkerResponse } from "./protocol";
 

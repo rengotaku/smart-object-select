@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import {
   FASTSAM_INPUT_NAME,
   FASTSAM_INPUT_SIZE,

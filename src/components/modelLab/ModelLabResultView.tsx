@@ -3,10 +3,10 @@ import type { MouseEvent } from "react";
 import { ImageOff, Loader2 } from "lucide-react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import type { LoadedImage } from "@/hooks";
+import type { LoadedImage } from "@/lib/imageLoader";
 import type { ModelLabBoxOverlay, ModelLabResult } from "@/lib/modelLab";
-import { toImageCoords } from "@/lib/sam/coords";
-import { maskToOverlayPixels } from "@/lib/sam/maskOverlay";
+import { toImageCoords } from "@/lib/coords";
+import { maskToOverlayPixels } from "@/lib/maskOverlay";
 
 const DEFAULT_CLICK_HINT_TEXT = "画像をクリックすると、その位置でマスクを推論します";
 

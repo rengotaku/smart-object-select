@@ -4,7 +4,7 @@ import {
   type EdgeSamMaskResult,
   type EdgeSamWorkerClient,
 } from "@/lib/modelLab/edgeSam";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 export type EdgeSamStatus = "idle" | "loading" | "segmenting" | "ready" | "error";
 

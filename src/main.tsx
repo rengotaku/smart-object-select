@@ -2,38 +2,67 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
 import App from "./App.tsx";
-import { logger } from "./lib/logger";
 
 /**
- * モデルアセットのオフラインキャッシュ用 Service Worker（public/sw.js）を登録する。
- * 未対応環境（`serviceWorker` が navigator に無い）や登録失敗時もアプリ本体の
- * 起動は妨げない（try/catch でフォールバックし、失敗時はログのみ残す）。
+ * 過去バージョン（本編/segment、issue #59で削除）が登録した Service Worker
+ * （`public/sw.js`、削除済み。`register("/sw.js")` は scope 未指定のため既定 scope は
+ * このオリジンの `/`）とそのモデルアセットキャッシュ（`CACHE_NAME_PREFIX`
+ * `smart-object-select-model-assets-`、旧 `src/lib/serviceWorker/cachePolicy.ts`、
+ * 削除済み）だけを解除する。
  *
- * `window.addEventListener("load", ...)` で遅延させず、スクリプト評価時に即座に
- * 登録する。初回アクセス直後にオフラインになった場合でも、SW の install 完了時点
- * でナビゲーションフォールバック用のアプリシェルキャッシュが用意されている必要が
- * あるため（public/sw.js の install ハンドラ参照）。
+ * `public/sw.js` を削除して登録処理を main.tsx から外しただけでは、以前このアプリに
+ * アクセスしたことがあるブラウザ（特に `wt dev` のように同一 origin/port を再利用する
+ * ローカル開発環境）では、既に有効化済みの旧 Service Worker がブラウザ側に残り続け、
+ * 全リクエストを横取りしたまま SlimSAM を含む大容量キャッシュも保持してしまう
+ * （issue #59 PR #60 codex レビュー指摘）。
+ *
+ * 🔴 対象は `scriptURL` が `/sw.js`（このアプリ由来）のもの・キャッシュ名が
+ * `smart-object-select-model-assets-` で始まるものだけに限定する。同一オリジンを
+ * サブパスで共有する別アプリの Service Worker / Cache Storage まで巻き込んで
+ * 解除・削除しない（codex レビュー P1 指摘、issue #59 PR #60 2回目）。
+ * 未対応環境・失敗時もアプリ本体の起動は妨げない。
  */
-function registerServiceWorker(): void {
+const STALE_SERVICE_WORKER_SCRIPT_PATH = "/sw.js";
+const STALE_CACHE_NAME_PREFIX = "smart-object-select-model-assets-";
+
+function isStaleServiceWorkerRegistration(
+  registration: ServiceWorkerRegistration
+): boolean {
+  const worker = registration.active ?? registration.waiting ?? registration.installing;
+  if (!worker) {
+    return false;
+  }
   try {
-    if (!("serviceWorker" in navigator)) {
-      return;
-    }
-    navigator.serviceWorker.register("/sw.js").catch((error: unknown) => {
-      logger.warn(
-        "Service Worker registration failed; continuing without offline cache",
-        error
-      );
-    });
-  } catch (error) {
-    logger.warn(
-      "Service Worker registration threw synchronously; continuing without offline cache",
-      error
-    );
+    return new URL(worker.scriptURL).pathname === STALE_SERVICE_WORKER_SCRIPT_PATH;
+  } catch {
+    return false;
   }
 }
 
-registerServiceWorker();
+function unregisterStaleServiceWorker(): void {
+  try {
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then((registrations) => {
+        registrations.filter(isStaleServiceWorkerRegistration).forEach((registration) => {
+          void registration.unregister();
+        });
+      });
+    }
+    if ("caches" in window) {
+      caches.keys().then((keys) => {
+        keys
+          .filter((key) => key.startsWith(STALE_CACHE_NAME_PREFIX))
+          .forEach((key) => {
+            void caches.delete(key);
+          });
+      });
+    }
+  } catch {
+    // 未対応環境・権限エラー等は無視する（アプリ本体の起動には影響しない）
+  }
+}
+
+unregisterStaleServiceWorker();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import { YOLO11N_SEG_INPUT_NAME, YOLO11N_SEG_MODEL_URL } from "./constants";
 import type {
   Yolo11nSegInferenceSession,

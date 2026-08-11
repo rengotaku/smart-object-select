@@ -1,8 +1,8 @@
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { ModelLabPage } from "./ModelLabPage";
-import * as imageLoaderModule from "@/lib/sam/imageLoader";
-import type { LoadedImage } from "@/hooks";
+import * as imageLoaderModule from "@/lib/imageLoader";
+import type { LoadedImage } from "@/lib/imageLoader";
 
 describe("ModelLabPage", () => {
   let revokeObjectURL: ReturnType<typeof vi.fn>;

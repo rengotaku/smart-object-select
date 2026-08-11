@@ -1,4 +1,4 @@
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 import type { FastSamDetection } from "./types";
 import type { FastSamWorkerRequest, FastSamWorkerResponse } from "./protocol";
 

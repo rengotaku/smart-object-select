@@ -5,7 +5,7 @@ import type {
   Yolo11nSegDetection,
   Yolo11nSegWorkerClient,
 } from "@/lib/modelLab/yolo11nSeg";
-import type { SamImageInput } from "@/lib/sam";
+import type { SamImageInput } from "@/lib/types";
 
 const DEFAULT_DETECTIONS: Yolo11nSegDetection[] = [
   {

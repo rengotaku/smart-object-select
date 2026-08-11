@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { Layout } from "@/components";
-import { ModelLabPage, NotFoundPage, SegmentPage } from "@/pages";
+import { ModelLabPage, NotFoundPage } from "@/pages";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -18,8 +18,7 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/segment" replace />} />
-            <Route path="segment" element={<SegmentPage />} />
+            <Route index element={<Navigate to="/model-lab" replace />} />
             <Route path="model-lab" element={<ModelLabPage />} />
             <Route path="*" element={<NotFoundPage />} />
           </Route>
