@@ -6,6 +6,7 @@ import {
   YOLO11N_SEG_MASK_PROTO_CHANNELS,
   YOLO11N_SEG_MASK_PROTO_SIZE,
   YOLO11N_SEG_MASK_THRESHOLD,
+  YOLO11N_SEG_MAX_NMS_CANDIDATES,
 } from "./constants";
 import { mapBoxToOriginal, type BoxXywh, type LetterboxTransform } from "./preprocess";
 import type { Yolo11nSegDetection } from "./types";
@@ -24,6 +25,15 @@ export interface DecodeDetectionsOptions {
   numClasses?: number;
   maskProtoChannels?: number;
   confidenceThreshold?: number;
+  /**
+   * 信頼度閾値通過後、NMS に渡す前に採用する候補数の上限（スコア降順で上位のみ残す）。
+   * 省略時は `YOLO11N_SEG_MAX_NMS_CANDIDATES`。**これは最終検出数の上限ではない**
+   * （`nms()` はクラス単位で重複を除去するのみで、最終検出数の上限は現状無い）。
+   * ここでの上限は純粋に NMS 自体（O(n^2) の素朴な貪欲法）のコストを抑えるためのもの
+   * （issue #56、FastSAM の `FASTSAM_MAX_NMS_CANDIDATES` と同じ設計方針。
+   * `../fastSam/postprocess.ts` の `DecodeDetectionsOptions.maxCandidates` 参照）。
+   */
+  maxCandidates?: number;
 }
 
 /**
@@ -33,6 +43,13 @@ export interface DecodeDetectionsOptions {
  *
  * box は中心座標形式（cx, cy, w, h）で格納されているため、左上原点の xywh へ変換して返す
  * （Ultralytics の `non_max_suppression` 前の生出力フォーマット、`ultralytics/utils/ops.py` 参照）。
+ *
+ * 信頼度閾値通過後の候補が `maxCandidates`（既定 `YOLO11N_SEG_MAX_NMS_CANDIDATES`）を超える場合、
+ * スコア降順で上位のみに打ち切る。これは NMS 自体（O(n^2) の素朴な貪欲法）のコストを
+ * 抑えるためだけの上限であり、最終検出数の上限ではない（issue #56、FastSAM の
+ * `decodeDetections`（`../fastSam/postprocess.ts`）と同じ設計方針。ただし YOLO11n-seg は
+ * class-aware NMS のため、この上限を超えないケースでも実質的な NMS コストは FastSAM の
+ * class-agnostic NMS より小さい）。
  */
 export function decodeDetections(
   output: Float32Array,
@@ -43,6 +60,7 @@ export function decodeDetections(
   const maskProtoChannels = options.maskProtoChannels ?? YOLO11N_SEG_MASK_PROTO_CHANNELS;
   const confidenceThreshold =
     options.confidenceThreshold ?? YOLO11N_SEG_CONFIDENCE_THRESHOLD;
+  const maxCandidates = options.maxCandidates ?? YOLO11N_SEG_MAX_NMS_CANDIDATES;
 
   const [, predLen, numCandidates] = dims;
   const expectedPredLen = 4 + numClasses + maskProtoChannels;
@@ -87,7 +105,13 @@ export function decodeDetections(
     });
   }
 
-  return detections;
+  if (detections.length <= maxCandidates) {
+    return detections;
+  }
+
+  // NMS 自体の O(n^2) コストを上限化するため、スコア降順で上位 maxCandidates 件のみ
+  // NMS に渡す（最終検出数の上限ではない点に注意。上記コメント参照）。
+  return detections.sort((a, b) => b.score - a.score).slice(0, maxCandidates);
 }
 
 /** 2つの xywh ボックスの IoU（重なり無しは 0）。 */

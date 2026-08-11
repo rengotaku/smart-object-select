@@ -8,6 +8,7 @@ import {
   type RawDetection,
 } from "./postprocess";
 import type { LetterboxTransform } from "./preprocess";
+import { YOLO11N_SEG_MAX_NMS_CANDIDATES } from "./constants";
 
 /**
  * テスト用に小さいクラス数・候補数の output0 を組み立てるヘルパー。
@@ -94,6 +95,67 @@ describe("decodeDetections", () => {
       confidenceThreshold: 0.25,
     });
     expect(result).toEqual([]);
+  });
+
+  it("信頼度閾値通過後の候補が maxCandidates を超える場合、スコア上位のみに打ち切る（NMS前段の候補数を絞る目的のみ。issue #56: 最終検出数の上限ではない）", () => {
+    // 5候補が閾値(0.25)を通過するが maxCandidates=3 のため上位3件のみ残るはず
+    const { data, dims } = buildOutput0(1, 1, [
+      { cx: 1, cy: 1, w: 1, h: 1, classScores: [0.5], maskCoeffs: [0] },
+      { cx: 2, cy: 2, w: 1, h: 1, classScores: [0.95], maskCoeffs: [0] },
+      { cx: 3, cy: 3, w: 1, h: 1, classScores: [0.6], maskCoeffs: [0] },
+      { cx: 4, cy: 4, w: 1, h: 1, classScores: [0.99], maskCoeffs: [0] },
+      { cx: 5, cy: 5, w: 1, h: 1, classScores: [0.26], maskCoeffs: [0] },
+    ]);
+
+    const result = decodeDetections(data, dims, {
+      numClasses: 1,
+      maskProtoChannels: 1,
+      confidenceThreshold: 0.25,
+      maxCandidates: 3,
+    });
+
+    expect(result).toHaveLength(3);
+    // スコア降順で上位3件（0.99, 0.95, 0.6）のみ残り、最低スコアの0.26・0.5は落ちる
+    const scores = result.map((d) => d.score).sort((a, b) => b - a);
+    expect(scores.map((s) => Number(s.toFixed(2)))).toEqual([0.99, 0.95, 0.6]);
+  });
+
+  it("候補数が maxCandidates 以下なら打ち切らない", () => {
+    const { data, dims } = buildOutput0(1, 1, [
+      { cx: 1, cy: 1, w: 1, h: 1, classScores: [0.5], maskCoeffs: [0] },
+      { cx: 2, cy: 2, w: 1, h: 1, classScores: [0.6], maskCoeffs: [0] },
+    ]);
+
+    const result = decodeDetections(data, dims, {
+      numClasses: 1,
+      maskProtoChannels: 1,
+      confidenceThreshold: 0.25,
+      maxCandidates: 3,
+    });
+
+    expect(result).toHaveLength(2);
+  });
+
+  it("maxCandidates を省略すると既定値 YOLO11N_SEG_MAX_NMS_CANDIDATES が使われる（NMS前段の上限）", () => {
+    // 閾値通過候補を YOLO11N_SEG_MAX_NMS_CANDIDATES + 1 件用意し、既定ではその件数に打ち切られることを確認する
+    const total = YOLO11N_SEG_MAX_NMS_CANDIDATES + 1;
+    const candidates = Array.from({ length: total }, (_, i) => ({
+      cx: i,
+      cy: i,
+      w: 1,
+      h: 1,
+      classScores: [0.5 + (i % 1000) * 0.0001],
+      maskCoeffs: [0],
+    }));
+    const { data, dims } = buildOutput0(1, 1, candidates);
+
+    const result = decodeDetections(data, dims, {
+      numClasses: 1,
+      maskProtoChannels: 1,
+      confidenceThreshold: 0.25,
+    });
+
+    expect(result).toHaveLength(YOLO11N_SEG_MAX_NMS_CANDIDATES);
   });
 });
 
