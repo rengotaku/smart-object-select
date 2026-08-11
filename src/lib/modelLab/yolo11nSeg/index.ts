@@ -10,6 +10,7 @@ export {
   YOLO11N_SEG_IOU_THRESHOLD,
   YOLO11N_SEG_MASK_THRESHOLD,
   YOLO11N_SEG_LETTERBOX_PAD_VALUE,
+  YOLO11N_SEG_MAX_NMS_CANDIDATES,
 } from "./constants";
 export type { Yolo11nSegDetection } from "./types";
 export {
